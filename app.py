@@ -2,7 +2,8 @@ import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 import calendar
-from datetime import datetime
+import os
+from datetime import datetime, timedelta, timezone
 
 # Configuração inicial
 st.set_page_config(page_title="Controle Financeiro", layout="wide", page_icon="💰")
@@ -212,32 +213,71 @@ st.markdown("""
 
 
 # --- TELA DE LOGIN / BLOQUEIO DE ACESSO ---
+def get_last_update_info():
+    """Retorna string com data/hora da última modificação do arquivo app.py (fuso de Brasília)."""
+    try:
+        mtime = os.path.getmtime(__file__)
+        # Brasília = UTC-3
+        dt_brasilia = datetime.fromtimestamp(mtime, tz=timezone.utc).astimezone(timezone(timedelta(hours=-3)))
+        return dt_brasilia.strftime("%d/%m/%Y às %H:%M")
+    except Exception:
+        return "indisponível"
+
+def password_entered():
+    if st.session_state["password"] == st.secrets["acesso"]["senha_app"]:
+        st.session_state["password_correct"] = True
+        del st.session_state["password"]
+    else:
+        st.session_state["password_correct"] = False
+
+def render_login_screen(error_message=None):
+    """Renderiza a tela de login (campo + opcional mensagem de erro + footer com timestamp)."""
+    st.markdown("<h2 style='text-align: center; color: #0f766e;'>🔒 Acesso Restrito</h2>", unsafe_allow_html=True)
+    # Colunas mais agressivas para estreitar o campo no desktop;
+    # no mobile o CSS abaixo limita pela propriedade max-width.
+    _, col_center, _ = st.columns([4, 3, 4])
+    with col_center:
+        # CSS local para limitar a largura máxima do input em qualquer viewport
+        st.markdown("""
+            <style>
+                div[data-testid="stTextInput"] {
+                    max-width: 320px;
+                    margin: 0 auto;
+                }
+            </style>
+        """, unsafe_allow_html=True)
+        st.text_input(
+            "Digite sua senha para acessar o Fluxo de Caixa:",
+            type="password",
+            on_change=password_entered,
+            key="password"
+        )
+        if error_message:
+            st.error(error_message)
+    
+    # Footer com timestamp da última atualização do código
+    ultima_atualizacao = get_last_update_info()
+    st.markdown(
+        f"""
+        <div style='text-align: center; margin-top: 40px; padding: 12px;
+                    font-size: 12px; color: #94a3b8; font-family: Inter, sans-serif;'>
+            <span style='opacity: 0.7;'>🔄 Última atualização do código:</span><br>
+            <span style='font-weight: 600; color: #64748b;'>{ultima_atualizacao}</span>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
 def check_password():
     """Retorna True se o usuário digitou a senha correta."""
-    def password_entered():
-        if st.session_state["password"] == st.secrets["acesso"]["senha_app"]:
-            st.session_state["password_correct"] = True
-            del st.session_state["password"]
-        else:
-            st.session_state["password_correct"] = False
-
     st.markdown("<br><br><br>", unsafe_allow_html=True)
     
     if "password_correct" not in st.session_state:
-        st.markdown("<h2 style='text-align: center; color: #0f766e;'>🔒 Acesso Restrito</h2>", unsafe_allow_html=True)
-        _, col_center, _ = st.columns([3, 4, 3])
-        with col_center:
-            st.text_input("Digite sua senha para acessar o Fluxo de Caixa:", type="password", on_change=password_entered, key="password")
+        render_login_screen()
         return False
-        
     elif not st.session_state["password_correct"]:
-        st.markdown("<h2 style='text-align: center; color: #0f766e;'>🔒 Acesso Restrito</h2>", unsafe_allow_html=True)
-        _, col_center, _ = st.columns([3, 4, 3])
-        with col_center:
-            st.text_input("Digite sua senha para acessar o Fluxo de Caixa:", type="password", on_change=password_entered, key="password")
-            st.error("😕 Senha incorreta. Tente novamente.")
+        render_login_screen(error_message="😕 Senha incorreta. Tente novamente.")
         return False
-        
     else:
         return True
 
@@ -266,13 +306,48 @@ menu = st.sidebar.radio(
 if menu == "Calendário":
     st.title("💸 Fluxo de Caixa")
     
-    _, col_mes, col_ano, _ = st.columns([3, 2, 2, 3])
     mes_atual = datetime.now().month
     ano_atual = datetime.now().year
     
-    mes_sel = col_mes.selectbox("Mês", list(range(1, 13)), index=mes_atual-1)
-    ano_sel = col_ano.number_input("Ano", min_value=2020, max_value=2030, value=ano_atual)
-
+    # CSS para estreitar e forçar lado-a-lado no seletor Mês/Ano.
+    # Estratégia: colocamos um elemento âncora vazio com ID único antes do bloco de colunas.
+    # No Streamlit, st.markdown gera um div dentro de um stVerticalBlock; o stHorizontalBlock
+    # do st.columns() seguinte fica como elemento irmão na mesma árvore vertical.
+    st.markdown("""
+        <style>
+            /* Âncora invisível que marca o início do seletor de período */
+            .calendar-period-anchor { display: none; }
+            
+            /* Pega o stHorizontalBlock que é irmão imediatamente seguinte ao container
+               do markdown contendo nossa âncora. Funciona porque ambos são filhos
+               diretos do mesmo stVerticalBlock. */
+            div[data-testid="stVerticalBlock"] 
+                > div[data-testid="stElementContainer"]:has(.calendar-period-anchor) 
+                + div[data-testid="stHorizontalBlock"] {
+                flex-wrap: nowrap !important;
+                gap: 10px !important;
+                max-width: 340px;
+                margin-left: auto !important;
+                margin-right: auto !important;
+            }
+            div[data-testid="stVerticalBlock"] 
+                > div[data-testid="stElementContainer"]:has(.calendar-period-anchor) 
+                + div[data-testid="stHorizontalBlock"] 
+                > div[data-testid="column"] {
+                flex: 1 1 50% !important;
+                width: 50% !important;
+                min-width: 0 !important;
+            }
+        </style>
+        <div class="calendar-period-anchor"></div>
+    """, unsafe_allow_html=True)
+    
+    col_mes, col_ano = st.columns(2, gap="small")
+    with col_mes:
+        mes_sel = st.selectbox("Mês", list(range(1, 13)), index=mes_atual-1)
+    with col_ano:
+        ano_sel = st.number_input("Ano", min_value=2020, max_value=2030, value=ano_atual)
+    
     st.markdown("<br>", unsafe_allow_html=True)
 
     df_fluxo = get_data("Fluxo_Caixa")
