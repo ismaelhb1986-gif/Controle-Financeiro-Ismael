@@ -320,7 +320,8 @@ def save_data(sheet_name, df):
 
 # --- MENU DE NAVEGAÇÃO HORIZONTAL ---
 # Substitui a sidebar tradicional por um menu de botões com ícones no topo da página.
-# É scrollável horizontalmente no mobile e mantém a mesma lógica de "menu == 'X'" abaixo.
+# Mantém uma única linha horizontal com scroll suave no mobile, e encurta labels
+# longos via CSS (sem alterar a lógica "menu == 'X'" abaixo).
 menu = option_menu(
     menu_title=None,
     options=["Calendário", "Lançamentos", "Relatório", "Cartões de Crédito", "Recorrentes", "Cadastros"],
@@ -329,13 +330,15 @@ menu = option_menu(
     default_index=0,
     styles={
         "container": {
-            "padding": "8px 4px",
+            "padding": "6px 4px",
             "background-color": "#ffffff",
             "border-radius": "12px",
             "border": "1px solid #f1f5f9",
             "box-shadow": "0 4px 6px -1px rgba(0, 0, 0, 0.04)",
             "margin-bottom": "16px",
+            "flex-wrap": "nowrap",
             "overflow-x": "auto",
+            "overflow-y": "hidden",
         },
         "icon": {"color": "#64748b", "font-size": "16px"},
         "nav-link": {
@@ -348,6 +351,7 @@ menu = option_menu(
             "padding": "8px 14px",
             "border-radius": "8px",
             "white-space": "nowrap",
+            "flex": "0 0 auto",
             "--hover-color": "#f1f5f9",
         },
         "nav-link-selected": {
@@ -358,12 +362,73 @@ menu = option_menu(
     },
 )
 
-# Garante que o ícone do botão selecionado fique branco (option_menu não propaga
-# o color do nav-link-selected para o <i> do ícone automaticamente).
+# Ajustes finos do menu horizontal:
+# 1) Força o ícone do item selecionado a ficar branco (o option_menu não usa
+#    a classe .active — o item ativo é o que tem o estilo inline aplicado por
+#    nav-link-selected, então miramos via [style*="background"] que é o sinal
+#    mais confiável; também cobrimos a classe .active por segurança).
+# 2) Garante linha única: o option_menu renderiza um <ul class="nav"> internamente
+#    que vem com flex-wrap:wrap herdado do Bootstrap — sobrescrevemos para nowrap.
+# 3) Esconde a barra de scroll horizontal mas mantém o scroll funcional (touch).
+# 4) Em telas pequenas, encurta os labels longos via ::after, escondendo o texto
+#    original com font-size:0 e injetando uma versão curta. Isso evita mexer na
+#    lógica de roteamento (que continua comparando com os nomes completos).
 st.markdown("""
     <style>
-        .nav-link.active i, .nav-link.active svg {
+        /* Linha única + scroll horizontal suave */
+        div[class^="nav"] > ul.nav,
+        nav.navbar ul.nav,
+        .stOptionMenu ul.nav {
+            flex-wrap: nowrap !important;
+            overflow-x: auto !important;
+            overflow-y: hidden !important;
+            scrollbar-width: none;
+            -ms-overflow-style: none;
+            -webkit-overflow-scrolling: touch;
+        }
+        div[class^="nav"] > ul.nav::-webkit-scrollbar,
+        nav.navbar ul.nav::-webkit-scrollbar {
+            display: none;
+        }
+
+        /* Ícone branco no item selecionado.
+           O option_menu marca o selecionado aplicando background-color via style inline,
+           então usamos isso como seletor — funciona mesmo sem a classe .active. */
+        .nav-link[style*="background-color: rgb(15, 118, 110)"] i,
+        .nav-link[style*="background-color: rgb(15, 118, 110)"] svg,
+        .nav-link.active i,
+        .nav-link.active svg {
             color: #ffffff !important;
+            fill: #ffffff !important;
+        }
+
+        /* Mobile: encurta labels longos sem alterar a lógica do app.
+           Esconde o texto original e injeta versão curta via ::after. */
+        @media (max-width: 640px) {
+            .nav-link {
+                padding: 8px 10px !important;
+                font-size: 12px !important;
+            }
+            .nav-link .icon {
+                margin-right: 4px !important;
+            }
+            /* Esconde o texto longo original (mantém só o ícone visível) */
+            .nav-link span:not(.icon) {
+                font-size: 0 !important;
+                line-height: 0 !important;
+            }
+            /* Reinjeta um label curto após o ícone */
+            .nav-link span:not(.icon)::after {
+                font-size: 12px !important;
+                line-height: 1.2 !important;
+                font-weight: 500 !important;
+            }
+            .nav-link[title="Calendário"] span:not(.icon)::after        { content: "Início"; }
+            .nav-link[title="Lançamentos"] span:not(.icon)::after       { content: "Lanç."; }
+            .nav-link[title="Relatório"] span:not(.icon)::after         { content: "Relat."; }
+            .nav-link[title="Cartões de Crédito"] span:not(.icon)::after{ content: "Cartões"; }
+            .nav-link[title="Recorrentes"] span:not(.icon)::after       { content: "Recor."; }
+            .nav-link[title="Cadastros"] span:not(.icon)::after         { content: "Config."; }
         }
     </style>
 """, unsafe_allow_html=True)
