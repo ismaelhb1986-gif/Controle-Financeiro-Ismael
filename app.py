@@ -3,6 +3,7 @@ from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 import calendar
 import os
+import hashlib
 from datetime import datetime, timedelta, timezone
 
 # Configuração inicial
@@ -223,21 +224,27 @@ def get_last_update_info():
     except Exception:
         return "indisponível"
 
+def get_auth_token():
+    """Gera um token determinístico baseado na senha. Não é a senha em texto puro,
+    é um hash SHA-256 da senha concatenada com um sal fixo. Suficiente para uso pessoal."""
+    senha = st.secrets["acesso"]["senha_app"]
+    return hashlib.sha256(f"{senha}|fluxo_caixa_v1".encode()).hexdigest()[:32]
+
 def password_entered():
-    if st.session_state["password"] == st.secrets["acesso"]["senha_app"]:
+    if st.session_state.get("password", "") == st.secrets["acesso"]["senha_app"]:
         st.session_state["password_correct"] = True
-        del st.session_state["password"]
+        # Persiste o token na URL para que recarregamentos / re-execuções não peçam senha
+        st.query_params["auth"] = get_auth_token()
+        if "password" in st.session_state:
+            del st.session_state["password"]
     else:
         st.session_state["password_correct"] = False
 
 def render_login_screen(error_message=None):
     """Renderiza a tela de login (campo + opcional mensagem de erro + footer com timestamp)."""
     st.markdown("<h2 style='text-align: center; color: #0f766e;'>🔒 Acesso Restrito</h2>", unsafe_allow_html=True)
-    # Colunas mais agressivas para estreitar o campo no desktop;
-    # no mobile o CSS abaixo limita pela propriedade max-width.
     _, col_center, _ = st.columns([4, 3, 4])
     with col_center:
-        # CSS local para limitar a largura máxima do input em qualquer viewport
         st.markdown("""
             <style>
                 div[data-testid="stTextInput"] {
@@ -255,7 +262,6 @@ def render_login_screen(error_message=None):
         if error_message:
             st.error(error_message)
     
-    # Footer com timestamp da última atualização do código
     ultima_atualizacao = get_last_update_info()
     st.markdown(
         f"""
@@ -269,17 +275,24 @@ def render_login_screen(error_message=None):
     )
 
 def check_password():
-    """Retorna True se o usuário digitou a senha correta."""
-    st.markdown("<br><br><br>", unsafe_allow_html=True)
-    
-    if "password_correct" not in st.session_state:
-        render_login_screen()
-        return False
-    elif not st.session_state["password_correct"]:
-        render_login_screen(error_message="😕 Senha incorreta. Tente novamente.")
-        return False
-    else:
+    """Retorna True se autenticado. Persiste o login via query param 'auth' na URL."""
+    # Primeiro: já autenticado nesta sessão?
+    if st.session_state.get("password_correct") is True:
         return True
+    
+    # Segundo: existe um token válido na URL? (caso de recarregamento/sessão renovada)
+    token_url = st.query_params.get("auth", "")
+    if token_url and token_url == get_auth_token():
+        st.session_state["password_correct"] = True
+        return True
+    
+    # Não autenticado: mostra tela de login
+    st.markdown("<br><br><br>", unsafe_allow_html=True)
+    if st.session_state.get("password_correct") is False:
+        render_login_screen(error_message="😕 Senha incorreta. Tente novamente.")
+    else:
+        render_login_screen()
+    return False
 
 if not check_password():
     st.stop()
@@ -309,44 +322,54 @@ if menu == "Calendário":
     mes_atual = datetime.now().month
     ano_atual = datetime.now().year
     
-    # CSS para estreitar e forçar lado-a-lado no seletor Mês/Ano.
-    # Estratégia: colocamos um elemento âncora vazio com ID único antes do bloco de colunas.
-    # No Streamlit, st.markdown gera um div dentro de um stVerticalBlock; o stHorizontalBlock
-    # do st.columns() seguinte fica como elemento irmão na mesma árvore vertical.
+    # Gera lista de períodos (12 meses para trás e 24 para frente a partir do mês atual).
+    # Cada opção é uma tupla (mes, ano); o display é "Mês/Ano".
+    nomes_meses_pt = [
+        "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+        "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"
+    ]
+    
+    periodos = []
+    for offset in range(-12, 25):  # -12 a +24
+        m = mes_atual + offset
+        a = ano_atual + (m - 1) // 12
+        m = ((m - 1) % 12) + 1
+        if 2020 <= a <= 2030:
+            periodos.append((m, a))
+    
+    # Remove duplicatas preservando ordem (caso o range gere repetidos por causa do clamp)
+    periodos = list(dict.fromkeys(periodos))
+    
+    # Encontra o índice do mês/ano atual para definir como default
+    try:
+        idx_default = periodos.index((mes_atual, ano_atual))
+    except ValueError:
+        idx_default = 0
+    
+    # CSS para limitar a largura do seletor (evita ele ocupar a tela toda no desktop)
     st.markdown("""
         <style>
-            /* Âncora invisível que marca o início do seletor de período */
-            .calendar-period-anchor { display: none; }
-            
-            /* Pega o stHorizontalBlock que é irmão imediatamente seguinte ao container
-               do markdown contendo nossa âncora. Funciona porque ambos são filhos
-               diretos do mesmo stVerticalBlock. */
-            div[data-testid="stVerticalBlock"] 
-                > div[data-testid="stElementContainer"]:has(.calendar-period-anchor) 
-                + div[data-testid="stHorizontalBlock"] {
-                flex-wrap: nowrap !important;
-                gap: 10px !important;
-                max-width: 340px;
-                margin-left: auto !important;
-                margin-right: auto !important;
-            }
-            div[data-testid="stVerticalBlock"] 
-                > div[data-testid="stElementContainer"]:has(.calendar-period-anchor) 
-                + div[data-testid="stHorizontalBlock"] 
-                > div[data-testid="column"] {
-                flex: 1 1 50% !important;
-                width: 50% !important;
-                min-width: 0 !important;
+            div[data-testid="stSelectbox"].calendar-period-selector,
+            div.calendar-period-selector div[data-testid="stSelectbox"] {
+                max-width: 260px;
+                margin: 0 auto;
             }
         </style>
-        <div class="calendar-period-anchor"></div>
+        <div class="calendar-period-selector"></div>
     """, unsafe_allow_html=True)
     
-    col_mes, col_ano = st.columns(2, gap="small")
-    with col_mes:
-        mes_sel = st.selectbox("Mês", list(range(1, 13)), index=mes_atual-1)
-    with col_ano:
-        ano_sel = st.number_input("Ano", min_value=2020, max_value=2030, value=ano_atual)
+    # CSS via wrapper - já que st.markdown não envolve widgets do Streamlit,
+    # uso colunas para centralizar e limitar largura
+    _, col_periodo, _ = st.columns([2, 3, 2])
+    with col_periodo:
+        periodo_sel = st.selectbox(
+            "Período",
+            options=periodos,
+            index=idx_default,
+            format_func=lambda p: f"{nomes_meses_pt[p[0]-1]}/{p[1]}",
+            label_visibility="collapsed"
+        )
+    mes_sel, ano_sel = periodo_sel
     
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -507,15 +530,49 @@ elif menu == "Relatório":
         df_fluxo["Competencia"] = pd.to_datetime(df_fluxo["Data_Efetivacao"]).dt.strftime('%m/%Y')
 
         st.subheader("🔍 Filtros")
-        f1, f2, f3, f4 = st.columns(4)
         
+        # Estratégia sem JS: âncoras invisíveis em st.markdown que ficam como irmãos diretos
+        # do stHorizontalBlock seguinte dentro do mesmo stVerticalBlock. Seletor CSS '+'
+        # casa o stHorizontalBlock imediatamente após cada âncora.
+        st.markdown("""
+            <style>
+                /* Âncoras invisíveis */
+                .filtros-anchor-1, .filtros-anchor-2 { display: none; }
+                
+                /* O stElementContainer que contém a âncora 1 ou 2 + o stHorizontalBlock seguinte */
+                div[data-testid="stElementContainer"]:has(> div > div > .filtros-anchor-1) + div[data-testid="stHorizontalBlock"],
+                div[data-testid="stElementContainer"]:has(> div > div > .filtros-anchor-2) + div[data-testid="stHorizontalBlock"] {
+                    flex-direction: row !important;
+                    flex-wrap: nowrap !important;
+                    gap: 10px !important;
+                }
+                div[data-testid="stElementContainer"]:has(> div > div > .filtros-anchor-1) + div[data-testid="stHorizontalBlock"] > div[data-testid="column"],
+                div[data-testid="stElementContainer"]:has(> div > div > .filtros-anchor-1) + div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"],
+                div[data-testid="stElementContainer"]:has(> div > div > .filtros-anchor-2) + div[data-testid="stHorizontalBlock"] > div[data-testid="column"],
+                div[data-testid="stElementContainer"]:has(> div > div > .filtros-anchor-2) + div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {
+                    flex: 1 1 50% !important;
+                    width: 50% !important;
+                    min-width: 0 !important;
+                    max-width: 50% !important;
+                }
+            </style>
+            <div class="filtros-anchor-1"></div>
+        """, unsafe_allow_html=True)
+        
+        # Primeiro par: Competência | Categoria
+        f1, f2 = st.columns(2, gap="small")
         opcoes_comp = df_fluxo["Competencia"].dropna().unique().tolist()
         opcoes_comp.sort(key=lambda x: datetime.strptime(x, '%m/%Y'), reverse=True)
-        filtro_comp = f1.multiselect("Competência (Mês/Ano)", opcoes_comp)
+        filtro_comp = f1.multiselect("Competência", opcoes_comp)
         
         opcoes_cat = df_fluxo["Categoria"].dropna().unique().tolist() if "Categoria" in df_fluxo.columns else []
         filtro_cat = f2.multiselect("Categoria", opcoes_cat)
         
+        # Âncora 2 antes do segundo par
+        st.markdown('<div class="filtros-anchor-2"></div>', unsafe_allow_html=True)
+        
+        # Segundo par: Origem | Cartão
+        f3, f4 = st.columns(2, gap="small")
         opcoes_origem = df_fluxo["Origem"].dropna().unique().tolist() if "Origem" in df_fluxo.columns else []
         filtro_origem = f3.multiselect("Origem", opcoes_origem)
         
@@ -818,7 +875,17 @@ elif menu == "Cadastros":
         df_cat = df_cadastros[["Categoria"]].dropna() if "Categoria" in df_cadastros.columns else pd.DataFrame(columns=["Categoria"])
         df_cat.index = range(1, len(df_cat) + 1)
         df_cat["Excluir"] = False
-        res_cat = st.data_editor(df_cat, num_rows="dynamic", use_container_width=False, key="ed_cat")
+        res_cat = st.data_editor(
+            df_cat,
+            num_rows="dynamic",
+            use_container_width=False,
+            hide_index=True,
+            column_config={
+                "Categoria": st.column_config.TextColumn("Categoria", width="medium"),
+                "Excluir": st.column_config.CheckboxColumn("Excluir", default=False, width="small"),
+            },
+            key="ed_cat"
+        )
     
     with col2:
         st.subheader("💳 Cartões")
