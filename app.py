@@ -1,5 +1,6 @@
 import streamlit as st
 from streamlit_gsheets import GSheetsConnection
+from streamlit_option_menu import option_menu
 import pandas as pd
 import calendar
 import os
@@ -60,9 +61,18 @@ st.markdown("""
         }
         
         /* --- 4. Barra Lateral (Sidebar) --- */
+        /* Sidebar escondida — navegação migrou para o menu horizontal no topo */
         [data-testid="stSidebar"] {
-            background-color: #e0f2fe !important;
-            border-right: 1px solid #bae6fd !important;
+            display: none !important;
+        }
+        [data-testid="stSidebarCollapsedControl"] {
+            display: none !important;
+        }
+        /* Quando a sidebar está escondida, o conteúdo principal pode usar largura total */
+        section[data-testid="stMain"] > div.block-container,
+        .main .block-container {
+            margin-left: auto !important;
+            margin-right: auto !important;
         }
         
         /* --- 5. Estilização dos Formulários (Efeito Cartão) --- */
@@ -308,12 +318,55 @@ def save_data(sheet_name, df):
     conn.update(worksheet=sheet_name, data=df)
     st.cache_data.clear()
 
-# --- MENU LATERAL ---
-st.sidebar.title("Navegação")
-menu = st.sidebar.radio(
-    "Ir para:",
-    ["Calendário", "Lançamentos", "Relatório", "Cartões de Crédito", "Recorrentes", "Cadastros"]
+# --- MENU DE NAVEGAÇÃO HORIZONTAL ---
+# Substitui a sidebar tradicional por um menu de botões com ícones no topo da página.
+# É scrollável horizontalmente no mobile e mantém a mesma lógica de "menu == 'X'" abaixo.
+menu = option_menu(
+    menu_title=None,
+    options=["Calendário", "Lançamentos", "Relatório", "Cartões de Crédito", "Recorrentes", "Cadastros"],
+    icons=["calendar3", "bank", "file-earmark-text", "credit-card", "arrow-repeat", "gear"],
+    orientation="horizontal",
+    default_index=0,
+    styles={
+        "container": {
+            "padding": "8px 4px",
+            "background-color": "#ffffff",
+            "border-radius": "12px",
+            "border": "1px solid #f1f5f9",
+            "box-shadow": "0 4px 6px -1px rgba(0, 0, 0, 0.04)",
+            "margin-bottom": "16px",
+            "overflow-x": "auto",
+        },
+        "icon": {"color": "#64748b", "font-size": "16px"},
+        "nav-link": {
+            "font-size": "13px",
+            "font-family": "Poppins, sans-serif",
+            "font-weight": "500",
+            "color": "#475569",
+            "text-align": "center",
+            "margin": "0 2px",
+            "padding": "8px 14px",
+            "border-radius": "8px",
+            "white-space": "nowrap",
+            "--hover-color": "#f1f5f9",
+        },
+        "nav-link-selected": {
+            "background-color": "#0f766e",
+            "color": "#ffffff",
+            "font-weight": "500",
+        },
+    },
 )
+
+# Garante que o ícone do botão selecionado fique branco (option_menu não propaga
+# o color do nav-link-selected para o <i> do ícone automaticamente).
+st.markdown("""
+    <style>
+        .nav-link.active i, .nav-link.active svg {
+            color: #ffffff !important;
+        }
+    </style>
+""", unsafe_allow_html=True)
 
 # --- TELA 1: CALENDÁRIO ---
 if menu == "Calendário":
@@ -346,21 +399,21 @@ if menu == "Calendário":
     except ValueError:
         idx_default = 0
     
-    # CSS para limitar a largura do seletor (evita ele ocupar a tela toda no desktop)
+    # Seletor de período centralizado e compacto. Uso uma âncora invisível para escopar
+    # o CSS apenas a este selectbox específico, sem afetar selectboxes de outras abas.
     st.markdown("""
         <style>
-            div[data-testid="stSelectbox"].calendar-period-selector,
-            div.calendar-period-selector div[data-testid="stSelectbox"] {
-                max-width: 260px;
+            .calendar-period-anchor { display: none; }
+            /* O stElementContainer da âncora é irmão direto do bloco com o stSelectbox */
+            div[data-testid="stElementContainer"]:has(> div > div > .calendar-period-anchor) ~ div div[data-testid="stSelectbox"] {
+                max-width: 180px;
                 margin: 0 auto;
             }
         </style>
-        <div class="calendar-period-selector"></div>
+        <div class="calendar-period-anchor"></div>
     """, unsafe_allow_html=True)
     
-    # CSS via wrapper - já que st.markdown não envolve widgets do Streamlit,
-    # uso colunas para centralizar e limitar largura
-    _, col_periodo, _ = st.columns([2, 3, 2])
+    _, col_periodo, _ = st.columns([3, 2, 3])
     with col_periodo:
         periodo_sel = st.selectbox(
             "Período",
