@@ -234,21 +234,28 @@ def get_last_update_info():
     except Exception:
         return "indisponível"
 
-def get_auth_token():
+def get_auth_token(senha):
     """Gera um token determinístico baseado na senha. Não é a senha em texto puro,
-    é um hash SHA-256 da senha concatenada com um sal fixo. Suficiente para uso pessoal."""
-    senha = st.secrets["acesso"]["senha_app"]
+    é um hash SHA-256 da senha concatenada com um sal fixo."""
     return hashlib.sha256(f"{senha}|fluxo_caixa_v1".encode()).hexdigest()[:32]
 
 def password_entered():
-    if st.session_state.get("password", "") == st.secrets["acesso"]["senha_app"]:
+    senha_digitada = st.session_state.get("password", "")
+    
+    # Verifica de quem é a senha e salva a URL correspondente na sessão
+    if senha_digitada == st.secrets["senhas"]["senha_pessoal"]:
         st.session_state["password_correct"] = True
-        # Persiste o token na URL para que recarregamentos / re-execuções não peçam senha
-        st.query_params["auth"] = get_auth_token()
-        if "password" in st.session_state:
-            del st.session_state["password"]
+        st.session_state["url_planilha"] = st.secrets["planilhas"]["url_pessoal"]
+        st.query_params["auth"] = get_auth_token(senha_digitada)
+    elif senha_digitada == st.secrets["senhas"]["senha_maqueli"]:
+        st.session_state["password_correct"] = True
+        st.session_state["url_planilha"] = st.secrets["planilhas"]["url_maqueli"]
+        st.query_params["auth"] = get_auth_token(senha_digitada)
     else:
         st.session_state["password_correct"] = False
+        
+    if "password" in st.session_state:
+        del st.session_state["password"]
 
 def render_login_screen(error_message=None):
     """Renderiza a tela de login (campo + opcional mensagem de erro + footer com timestamp)."""
@@ -285,17 +292,23 @@ def render_login_screen(error_message=None):
     )
 
 def check_password():
-    """Retorna True se autenticado. Persiste o login via query param 'auth' na URL."""
-    # Primeiro: já autenticado nesta sessão?
+    """Retorna True se autenticado e mapeia a planilha correta caso seja via URL token."""
     if st.session_state.get("password_correct") is True:
         return True
     
-    # Segundo: existe um token válido na URL? (caso de recarregamento/sessão renovada)
     token_url = st.query_params.get("auth", "")
-    if token_url and token_url == get_auth_token():
-        st.session_state["password_correct"] = True
-        return True
-    
+    if token_url:
+        # Checa se o token da URL bate com o token da sua senha pessoal
+        if token_url == get_auth_token(st.secrets["senhas"]["senha_pessoal"]):
+            st.session_state["password_correct"] = True
+            st.session_state["url_planilha"] = st.secrets["planilhas"]["url_pessoal"]
+            return True
+        # Checa se o token da URL bate com o token da Maqueli
+        elif token_url == get_auth_token(st.secrets["senhas"]["senha_maqueli"]):
+            st.session_state["password_correct"] = True
+            st.session_state["url_planilha"] = st.secrets["planilhas"]["url_maqueli"]
+            return True
+
     # Não autenticado: mostra tela de login
     st.markdown("<br><br><br>", unsafe_allow_html=True)
     if st.session_state.get("password_correct") is False:
@@ -307,8 +320,8 @@ def check_password():
 if not check_password():
     st.stop()
 
-# Conexão com Google Sheets
-conn = st.connection("gsheets", type=GSheetsConnection)
+# Conexão com Google Sheets (Puxa a planilha dinamicamente do login)
+conn = st.connection("gsheets", type=GSheetsConnection, spreadsheet=st.session_state["url_planilha"])
 
 # --- FUNÇÕES AUXILIARES ---
 def get_data(sheet_name):
@@ -319,22 +332,6 @@ def save_data(sheet_name, df):
     st.cache_data.clear()
 
 # --- MENU DE NAVEGAÇÃO HORIZONTAL ---
-# Substitui a sidebar tradicional por um menu de botões com ícones no topo da página.
-# O option_menu roda dentro de um iframe, então CSS injetado via st.markdown NÃO
-# atravessa para dentro dele — todos os ajustes precisam ir via parâmetro `styles`
-# (cada chave aqui vira `style="..."` inline no elemento correspondente, o que
-# tem precedência sobre o CSS interno do componente).
-#
-# Decisões:
-#  - "Cartões de Crédito" foi encurtado para "Cartões" — a comparação `elif menu ==
-#    "Cartões"` no roteamento abaixo foi atualizada para refletir isso.
-#  - styles["nav"] (o <ul>) recebe flex-wrap:nowrap + overflow-x:auto: é ele que
-#    quebrava em múltiplas linhas (o Bootstrap interno tem `.nav { flex-wrap: wrap }`).
-#  - styles["nav-item"] recebe flex: 0 0 auto para que cada botão preserve a
-#    própria largura em vez de tentar dividir o espaço igualmente.
-#  - styles["icon"] NÃO define `color` — assim o ícone herda a cor do <a> pai.
-#    Quando o item é selecionado e o <a> ganha color: #ffffff, o ícone (font icon
-#    do Bootstrap Icons, renderizado via ::before) automaticamente fica branco.
 menu = option_menu(
     menu_title=None,
     options=["Calendário", "Lançamentos", "Relatório", "Cartões", "Recorrentes", "Cadastros"],
@@ -392,36 +389,29 @@ if menu == "Calendário":
     mes_atual = datetime.now().month
     ano_atual = datetime.now().year
     
-    # Gera lista de períodos (12 meses para trás e 24 para frente a partir do mês atual).
-    # Cada opção é uma tupla (mes, ano); o display é "Mês/Ano".
     nomes_meses_pt = [
         "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
         "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"
     ]
     
     periodos = []
-    for offset in range(-12, 25):  # -12 a +24
+    for offset in range(-12, 25):  
         m = mes_atual + offset
         a = ano_atual + (m - 1) // 12
         m = ((m - 1) % 12) + 1
         if 2020 <= a <= 2030:
             periodos.append((m, a))
     
-    # Remove duplicatas preservando ordem (caso o range gere repetidos por causa do clamp)
     periodos = list(dict.fromkeys(periodos))
     
-    # Encontra o índice do mês/ano atual para definir como default
     try:
         idx_default = periodos.index((mes_atual, ano_atual))
     except ValueError:
         idx_default = 0
     
-    # Seletor de período centralizado e compacto. Uso uma âncora invisível para escopar
-    # o CSS apenas a este selectbox específico, sem afetar selectboxes de outras abas.
     st.markdown("""
         <style>
             .calendar-period-anchor { display: none; }
-            /* O stElementContainer da âncora é irmão direto do bloco com o stSelectbox */
             div[data-testid="stElementContainer"]:has(> div > div > .calendar-period-anchor) ~ div div[data-testid="stSelectbox"] {
                 max-width: 180px;
                 margin: 0 auto;
@@ -460,14 +450,11 @@ if menu == "Calendário":
         cal = calendar.monthcalendar(ano_sel, mes_sel)
         dias_semana = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"]
         
-        # --- MONTAGEM DO CALENDÁRIO COMO HTML ÚNICO (preserva grid em mobile) ---
         html_parts = ['<div class="calendar-scroll-wrapper"><div class="calendar-grid">']
         
-        # Cabeçalho dos dias da semana
         for dia_nome in dias_semana:
             html_parts.append(f'<div class="calendar-header">{dia_nome}</div>')
         
-        # Células dos dias
         for semana in cal:
             for dia in semana:
                 if dia == 0:
@@ -513,7 +500,6 @@ if menu == "Calendário":
         html_parts.append('</div></div>')
         st.markdown("".join(html_parts), unsafe_allow_html=True)
         
-        # Dica discreta para o usuário mobile
         st.markdown(
             "<p style='text-align:center; font-size:11px; color:#94a3b8; margin-top:8px;'>"
             "💡 No celular, deslize horizontalmente para ver a semana completa"
@@ -570,7 +556,7 @@ elif menu == "Lançamentos":
                             "Valor": valor_final,
                             "Status": "Efetivado",
                             "Origem": "Movimento Banco",
-                            "Cartao": ""                 
+                            "Cartao": ""                
                         }])
                         df_atual = get_data("Fluxo_Caixa")
                         if df_atual.empty or len(df_atual.columns) == 0:
@@ -601,15 +587,10 @@ elif menu == "Relatório":
 
         st.subheader("🔍 Filtros")
         
-        # Estratégia sem JS: âncoras invisíveis em st.markdown que ficam como irmãos diretos
-        # do stHorizontalBlock seguinte dentro do mesmo stVerticalBlock. Seletor CSS '+'
-        # casa o stHorizontalBlock imediatamente após cada âncora.
         st.markdown("""
             <style>
-                /* Âncoras invisíveis */
                 .filtros-anchor-1, .filtros-anchor-2 { display: none; }
                 
-                /* O stElementContainer que contém a âncora 1 ou 2 + o stHorizontalBlock seguinte */
                 div[data-testid="stElementContainer"]:has(> div > div > .filtros-anchor-1) + div[data-testid="stHorizontalBlock"],
                 div[data-testid="stElementContainer"]:has(> div > div > .filtros-anchor-2) + div[data-testid="stHorizontalBlock"] {
                     flex-direction: row !important;
@@ -629,7 +610,6 @@ elif menu == "Relatório":
             <div class="filtros-anchor-1"></div>
         """, unsafe_allow_html=True)
         
-        # Primeiro par: Competência | Categoria
         f1, f2 = st.columns(2, gap="small")
         opcoes_comp = df_fluxo["Competencia"].dropna().unique().tolist()
         opcoes_comp.sort(key=lambda x: datetime.strptime(x, '%m/%Y'), reverse=True)
@@ -638,16 +618,14 @@ elif menu == "Relatório":
         opcoes_cat = df_fluxo["Categoria"].dropna().unique().tolist() if "Categoria" in df_fluxo.columns else []
         filtro_cat = f2.multiselect("Categoria", opcoes_cat)
         
-        # Âncora 2 antes do segundo par
         st.markdown('<div class="filtros-anchor-2"></div>', unsafe_allow_html=True)
         
-        # Segundo par: Origem | Cartão
         f3, f4 = st.columns(2, gap="small")
         opcoes_origem = df_fluxo["Origem"].dropna().unique().tolist() if "Origem" in df_fluxo.columns else []
         filtro_origem = f3.multiselect("Origem", opcoes_origem)
         
         opcoes_cartao = df_fluxo["Cartao"].dropna().unique().tolist() if "Cartao" in df_fluxo.columns else []
-        opcoes_cartao = [c for c in opcoes_cartao if str(c).strip() != ""] 
+        opcoes_cartao = [c for c in opcoes_cartao if str(c).strip() != ""]
         filtro_cartao = f4.multiselect("Cartão", opcoes_cartao)
 
         df_filtrado = df_fluxo.copy()
@@ -668,7 +646,7 @@ elif menu == "Relatório":
         st.subheader("📋 Resultados")
         
         col_config = {
-            "ID": None, 
+            "ID": None,
             "Excluir": st.column_config.CheckboxColumn("Excluir", default=False),
             "Data_Ocorrencia": st.column_config.DateColumn("Data Ocorrência", format="DD/MM/YYYY"),
             "Data_Efetivacao": st.column_config.DateColumn("Data Efetivação", format="DD/MM/YYYY"),
@@ -794,7 +772,7 @@ elif menu == "Cartões":
                                 "Data_Efetivacao": data_vencimento.strftime("%Y-%m-%d"),
                                 "Tipo": "Saída", "Categoria": cat_sel, "Descricao": desc_final,
                                 "Valor": -valor_desta_parcela, "Status": "Previsão (Fatura)",
-                                "Origem": "Cartão de Crédito", "Cartao": cartao_sel           
+                                "Origem": "Cartão de Crédito", "Cartao": cartao_sel          
                             })
                         
                         df_novos = pd.DataFrame(novos_lancamentos)
