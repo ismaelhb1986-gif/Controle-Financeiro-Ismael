@@ -320,15 +320,17 @@ def check_password():
 if not check_password():
     st.stop()
 
-# Conexão com Google Sheets (Puxa a planilha dinamicamente do login)
-conn = st.connection("gsheets", type=GSheetsConnection, spreadsheet=st.session_state["url_planilha"])
+# 1. Estabelece a conexão base (Usa apenas as credenciais de acesso do Secrets)
+conn = st.connection("gsheets", type=GSheetsConnection)
 
 # --- FUNÇÕES AUXILIARES ---
 def get_data(sheet_name):
-    return conn.read(worksheet=sheet_name, ttl=0)
+    # 2. Informa qual planilha ler, usando a URL que foi salva na sessão após o login
+    return conn.read(spreadsheet=st.session_state["url_planilha"], worksheet=sheet_name, ttl=0)
 
 def save_data(sheet_name, df):
-    conn.update(worksheet=sheet_name, data=df)
+    # 3. Informa em qual planilha salvar, usando a URL da sessão
+    conn.update(spreadsheet=st.session_state["url_planilha"], worksheet=sheet_name, data=df)
     st.cache_data.clear()
 
 # --- MENU DE NAVEGAÇÃO HORIZONTAL ---
