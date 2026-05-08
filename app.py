@@ -13,7 +13,7 @@ st.markdown("""
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Inter:wght@400;500&display=swap');
 
-        /* --- 1. REGRAS DE RESPONSIVIDADE E ZOOM MOBILE (NOVO) --- */
+        /* --- 1. REGRAS DE RESPONSIVIDADE E ZOOM MOBILE --- */
         html, body {
             max-width: 100%;
             overflow-x: hidden;
@@ -101,6 +101,112 @@ st.markdown("""
             background-color: #115e59 !important;
             box-shadow: 0 4px 6px -1px rgba(15, 118, 110, 0.4) !important;
         }
+
+        /* --- 8. CALENDÁRIO RESPONSIVO COM ROLAGEM HORIZONTAL (NOVO) --- */
+        .calendar-scroll-wrapper {
+            width: 100%;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            padding-bottom: 12px;
+            /* Cria uma "pista de rolagem" sutil para indicar que dá para deslizar */
+            scrollbar-width: thin;
+            scrollbar-color: #cbd5e1 #f1f5f9;
+        }
+        .calendar-scroll-wrapper::-webkit-scrollbar {
+            height: 8px;
+        }
+        .calendar-scroll-wrapper::-webkit-scrollbar-track {
+            background: #f1f5f9;
+            border-radius: 4px;
+        }
+        .calendar-scroll-wrapper::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+        
+        .calendar-grid {
+            display: grid;
+            grid-template-columns: repeat(7, minmax(135px, 1fr));
+            gap: 10px;
+            /* Garante que no desktop ocupe 100%, mas no mobile force a largura mínima das 7 colunas */
+            min-width: 945px;
+        }
+        
+        .calendar-header {
+            text-align: center;
+            font-weight: 600;
+            font-family: 'Poppins', sans-serif;
+            color: #64748b;
+            padding-bottom: 8px;
+            font-size: 13px;
+        }
+        
+        .calendar-cell {
+            padding: 10px;
+            border-radius: 12px;
+            height: 110px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            box-shadow: 0 4px 6px -1px rgba(0,0,0,0.02);
+            box-sizing: border-box;
+        }
+        
+        .calendar-cell-empty {
+            background-color: transparent;
+            border: 1px dashed #cbd5e1;
+        }
+        
+        .calendar-cell-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+        }
+        
+        .calendar-day-number {
+            font-size: 14px;
+            color: #475569;
+            font-weight: 700;
+        }
+        
+        .calendar-movement {
+            font-size: 11px;
+            font-weight: 600;
+        }
+        
+        .calendar-cell-bottom {
+            text-align: right;
+        }
+        
+        .calendar-saldo-label {
+            font-size: 10px;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .calendar-saldo-valor {
+            font-weight: 700;
+            font-size: 13px;
+            font-family: 'Inter', sans-serif;
+        }
+
+        /* No celular, reduz um pouco a fonte interna das células para caber melhor */
+        @media (max-width: 768px) {
+            .calendar-grid {
+                grid-template-columns: repeat(7, 120px);
+                min-width: 870px;
+                gap: 8px;
+            }
+            .calendar-cell {
+                height: 100px;
+                padding: 8px;
+            }
+            .calendar-day-number { font-size: 13px; }
+            .calendar-movement { font-size: 10px; }
+            .calendar-saldo-valor { font-size: 12px; }
+            .calendar-saldo-label { font-size: 9px; }
+        }
     </style>
 """, unsafe_allow_html=True)
 
@@ -111,16 +217,14 @@ def check_password():
     def password_entered():
         if st.session_state["password"] == st.secrets["acesso"]["senha_app"]:
             st.session_state["password_correct"] = True
-            del st.session_state["password"]  # Apaga a senha da memória por segurança
+            del st.session_state["password"]
         else:
             st.session_state["password_correct"] = False
 
-    # Margem superior para empurrar o login mais para o meio da tela
     st.markdown("<br><br><br>", unsafe_allow_html=True)
     
     if "password_correct" not in st.session_state:
         st.markdown("<h2 style='text-align: center; color: #0f766e;'>🔒 Acesso Restrito</h2>", unsafe_allow_html=True)
-        # Cria 3 colunas: 30% vazia na esquerda, 40% pro campo de senha, 30% vazia na direita
         _, col_center, _ = st.columns([3, 4, 3])
         with col_center:
             st.text_input("Digite sua senha para acessar o Fluxo de Caixa:", type="password", on_change=password_entered, key="password")
@@ -135,10 +239,8 @@ def check_password():
         return False
         
     else:
-        # Senha correta!
         return True
 
-# Se a senha não estiver correta, o st.stop() impede que o resto do app carregue.
 if not check_password():
     st.stop()
 
@@ -171,7 +273,7 @@ if menu == "Calendário":
     mes_sel = col_mes.selectbox("Mês", list(range(1, 13)), index=mes_atual-1)
     ano_sel = col_ano.number_input("Ano", min_value=2020, max_value=2030, value=ano_atual)
 
-    st.markdown("<br><br>", unsafe_allow_html=True)
+    st.markdown("<br>", unsafe_allow_html=True)
 
     df_fluxo = get_data("Fluxo_Caixa")
     df_config = get_data("Cadastros")
@@ -184,22 +286,24 @@ if menu == "Calendário":
     if not df_fluxo.empty and "Data_Efetivacao" in df_fluxo.columns:
         df_fluxo['Data_Efetivacao'] = pd.to_datetime(df_fluxo['Data_Efetivacao'])
         df_fluxo = df_fluxo.sort_values('Data_Efetivacao')
-        
         df_fluxo['Saldo_Acumulado'] = saldo_inicial + df_fluxo['Valor'].cumsum()
         
         calendar.setfirstweekday(calendar.SUNDAY)
         cal = calendar.monthcalendar(ano_sel, mes_sel)
         dias_semana = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"]
         
-        cols = st.columns(7)
-        for i, dia_nome in enumerate(dias_semana):
-            cols[i].markdown(f"<div style='text-align:center; font-weight:600; font-family:Poppins; color:#64748b; padding-bottom:10px;'>{dia_nome}</div>", unsafe_allow_html=True)
-
+        # --- MONTAGEM DO CALENDÁRIO COMO HTML ÚNICO (preserva grid em mobile) ---
+        html_parts = ['<div class="calendar-scroll-wrapper"><div class="calendar-grid">']
+        
+        # Cabeçalho dos dias da semana
+        for dia_nome in dias_semana:
+            html_parts.append(f'<div class="calendar-header">{dia_nome}</div>')
+        
+        # Células dos dias
         for semana in cal:
-            cols = st.columns(7)
-            for i, dia in enumerate(semana):
+            for dia in semana:
                 if dia == 0:
-                    cols[i].markdown('<div style="height: 110px; background-color: transparent; border-radius: 12px; border: 1px dashed #cbd5e1; margin-bottom: 15px;"></div>', unsafe_allow_html=True)
+                    html_parts.append('<div class="calendar-cell calendar-cell-empty"></div>')
                 else:
                     data_dia = datetime(ano_sel, mes_sel, dia)
                     
@@ -225,21 +329,29 @@ if menu == "Calendário":
                         
                     texto_movimento = f"{sinal_mov}R$ {movimento_dia:,.2f}" if movimento_dia != 0 else "-"
                     
-                    cols[i].markdown(
-                        f"""
-                        <div style="border: 1px solid {borda}; padding: 10px; border-radius: 12px; background-color: {bg_cor}; height: 110px; margin-bottom: 15px; display: flex; flex-direction: column; justify-content: space-between; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.02);">
-                            <div style="display: flex; justify-content: space-between; align-items: flex-start;">
-                                <span style="font-size: 14px; color: #475569; font-weight: 700;">{dia}</span>
-                                <span style="font-size: 11px; color: {cor_mov}; font-weight: 600;">{texto_movimento}</span>
-                            </div>
-                            <div style="text-align: right;">
-                                <span style="font-size: 10px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px;">Saldo</span><br>
-                                <span style="font-weight: 700; color: {cor_texto}; font-size: 13px; font-family: 'Inter', sans-serif;">R$ {valor_saldo:,.2f}</span>
-                            </div>
-                        </div>
-                        """, 
-                        unsafe_allow_html=True
+                    html_parts.append(
+                        f'<div class="calendar-cell" style="background-color:{bg_cor}; border:1px solid {borda};">'
+                            f'<div class="calendar-cell-top">'
+                                f'<span class="calendar-day-number">{dia}</span>'
+                                f'<span class="calendar-movement" style="color:{cor_mov};">{texto_movimento}</span>'
+                            f'</div>'
+                            f'<div class="calendar-cell-bottom">'
+                                f'<span class="calendar-saldo-label">Saldo</span><br>'
+                                f'<span class="calendar-saldo-valor" style="color:{cor_texto};">R$ {valor_saldo:,.2f}</span>'
+                            f'</div>'
+                        f'</div>'
                     )
+        
+        html_parts.append('</div></div>')
+        st.markdown("".join(html_parts), unsafe_allow_html=True)
+        
+        # Dica discreta para o usuário mobile
+        st.markdown(
+            "<p style='text-align:center; font-size:11px; color:#94a3b8; margin-top:8px;'>"
+            "💡 No celular, deslize horizontalmente para ver a semana completa"
+            "</p>",
+            unsafe_allow_html=True
+        )
     else:
         st.info("Nenhum lançamento encontrado para calcular o fluxo de caixa.")
 
@@ -361,7 +473,6 @@ elif menu == "Relatório":
             "Valor": st.column_config.NumberColumn("Valor (R$)", format="%.2f")
         }
 
-        # AJUSTE: use_container_width alterado de True para False aqui
         df_editado = st.data_editor(
             df_filtrado,
             column_config=col_config,
@@ -508,7 +619,6 @@ elif menu == "Recorrentes":
     if df_recorrentes.empty:
         df_recorrentes = pd.DataFrame(columns=["ID", "Descricao", "Categoria", "Tipo", "Valor_Base", "Dia_Vencimento"])
 
-    # Envolvendo todo o conteúdo das recorrentes num contentor centralizado
     _, col_center, _ = st.columns([1.5, 7, 1.5])
     
     with col_center:
@@ -579,7 +689,6 @@ elif menu == "Recorrentes":
             
             col_config_rec = {"ID": None, "Excluir": st.column_config.CheckboxColumn("Excluir", default=False, width="small"), "Valor_Base": st.column_config.NumberColumn("Valor (R$)", format="%.2f"), "Dia_Vencimento": st.column_config.NumberColumn("Dia Venc.", min_value=1, max_value=31), "Tipo": st.column_config.SelectboxColumn("Tipo", options=["Saída", "Entrada"]), "Categoria": st.column_config.SelectboxColumn("Categoria", options=categorias)}
             
-            # AJUSTE: use_container_width alterado de True para False aqui também
             df_editado_rec = st.data_editor(df_edit_rec, column_config=col_config_rec, use_container_width=False, num_rows="fixed", key="editor_recorrentes")
             
             if st.button("Salvar Alterações e Atualizar Fluxo", type="primary"):
@@ -634,7 +743,6 @@ elif menu == "Cadastros":
         df_cat = df_cadastros[["Categoria"]].dropna() if "Categoria" in df_cadastros.columns else pd.DataFrame(columns=["Categoria"])
         df_cat.index = range(1, len(df_cat) + 1)
         df_cat["Excluir"] = False
-        # AJUSTE: use_container_width alterado de True para False aqui na tabela de categorias
         res_cat = st.data_editor(df_cat, num_rows="dynamic", use_container_width=False, key="ed_cat")
     
     with col2:
@@ -647,7 +755,6 @@ elif menu == "Cadastros":
         df_cart.index = range(1, len(df_cart) + 1)
         df_cart["Excluir"] = False
         
-        # O False impede que o Streamlit force a tabela a tentar caber na tela do celular espremendo as colunas
         res_cart = st.data_editor(df_cart, num_rows="dynamic", use_container_width=False, key="ed_cart")
 
     if st.button("Salvar Tudo", type="primary"):
