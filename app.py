@@ -804,6 +804,7 @@ elif menu == "Recorrentes":
     _, col_center, _ = st.columns([1.5, 7, 1.5])
     
     with col_center:
+        # 1. BLOCO: CADASTRAR NOVO RECORRENTE
         with st.expander("➕ Cadastrar Novo Recorrente", expanded=False):
             with st.form("form_recorrente", clear_on_submit=True):
                 st.markdown("<h3 style='text-align:center; color:#334155; font-family:Poppins; margin-bottom:20px; font-size:18px;'>Nova Conta Recorrente</h3>", unsafe_allow_html=True)
@@ -827,7 +828,54 @@ elif menu == "Recorrentes":
                         st.success("Item salvo no catálogo!")
                         st.rerun()
 
-        st.markdown("<br>", unsafe_allow_html=True)
+        # 2. BLOCO: EDITAR CATÁLOGO (Movido para o meio)
+        st.markdown("---")
+        st.subheader("📋 Editar Catálogo")
+        if not df_recorrentes.empty:
+            df_edit_rec = df_recorrentes.copy()
+            df_edit_rec["Excluir"] = False
+            df_edit_rec["Valor_Base"] = pd.to_numeric(df_edit_rec["Valor_Base"], errors="coerce")
+            df_edit_rec["Dia_Vencimento"] = pd.to_numeric(df_edit_rec["Dia_Vencimento"], errors="coerce").astype(int)
+            
+            col_config_rec = {"ID": None, "Excluir": st.column_config.CheckboxColumn("Excluir", default=False, width="small"), "Valor_Base": st.column_config.NumberColumn("Valor (R$)", format="%.2f"), "Dia_Vencimento": st.column_config.NumberColumn("Dia Venc.", min_value=1, max_value=31), "Tipo": st.column_config.SelectboxColumn("Tipo", options=["Saída", "Entrada"]), "Categoria": st.column_config.SelectboxColumn("Categoria", options=categorias)}
+            
+            df_editado_rec = st.data_editor(df_edit_rec, column_config=col_config_rec, use_container_width=False, num_rows="fixed", key="editor_recorrentes")
+            
+            if st.button("Salvar Alterações e Atualizar Fluxo", type="primary"):
+                df_editado_rec["Excluir"] = df_editado_rec["Excluir"].fillna(False)
+                ids_excluir = df_editado_rec[df_editado_rec["Excluir"] == True]["ID"].astype(str).tolist()
+                df_salvar = df_editado_rec[df_editado_rec["Excluir"] == False].drop(columns=["Excluir"])
+                save_data("Recorrentes", df_salvar)
+                
+                if not df_fluxo.empty and "ID" in df_fluxo.columns:
+                    df_fluxo["ID"] = df_fluxo["ID"].astype(str)
+                    df_fluxo_novo = df_fluxo.copy()
+                    df_fluxo_novo["Data_Efetivacao_dt"] = pd.to_datetime(df_fluxo_novo["Data_Efetivacao"]).dt.date
+                    hoje_date = datetime.now().date()
+                    
+                    for rec_id in ids_excluir:
+                        mascara_apagar = (df_fluxo_novo["ID"].str.startswith(f"REC_{rec_id}")) & (df_fluxo_novo["Status"] == "Previsão (Recorrente)") & (df_fluxo_novo["Data_Efetivacao_dt"] >= hoje_date)
+                        df_fluxo_novo = df_fluxo_novo[~mascara_apagar]
+                    
+                    for _, row in df_salvar.iterrows():
+                        mascara_atualizar = (df_fluxo_novo["ID"].str.startswith(f"REC_{str(row['ID'])}")) & (df_fluxo_novo["Status"] == "Previsão (Recorrente)") & (df_fluxo_novo["Data_Efetivacao_dt"] >= hoje_date)
+                        if mascara_atualizar.any():
+                            df_fluxo_novo.loc[mascara_atualizar, "Valor"] = -float(row["Valor_Base"]) if row["Tipo"] == "Saída" else float(row["Valor_Base"])
+                            df_fluxo_novo.loc[mascara_atualizar, "Descricao"] = row["Descricao"]
+                            df_fluxo_novo.loc[mascara_atualizar, "Categoria"] = row["Categoria"]
+                            df_fluxo_novo.loc[mascara_atualizar, "Tipo"] = row["Tipo"]
+                            
+                            novas_datas = []
+                            for d in pd.to_datetime(df_fluxo_novo.loc[mascara_atualizar, "Data_Efetivacao"]):
+                                novas_datas.append(datetime(d.year, d.month, min(int(row["Dia_Vencimento"]), calendar.monthrange(d.year, d.month)[1])).strftime("%Y-%m-%d"))
+                            df_fluxo_novo.loc[mascara_atualizar, "Data_Efetivacao"] = novas_datas
+
+                    save_data("Fluxo_Caixa", df_fluxo_novo.drop(columns=["Data_Efetivacao_dt"]))
+                st.success("Sincronizado com sucesso!")
+                st.rerun()
+
+        # 3. BLOCO: INJETAR PREVISÕES (Movido para o final)
+        st.markdown("---")
         st.subheader("📅 Projetar Previsões Futuras")
         
         opcoes_itens = ["Todos"] + df_recorrentes["Descricao"].tolist() if not df_recorrentes.empty else ["Todos"]
@@ -883,51 +931,6 @@ elif menu == "Recorrentes":
                     st.success(f"✅ {len(novos_lancamentos)} previsões criadas!")
                 else:
                     st.info("As previsões para este período já estavam projetadas.")
-
-        st.markdown("---")
-        st.subheader("📋 Editar Catálogo")
-        if not df_recorrentes.empty:
-            df_edit_rec = df_recorrentes.copy()
-            df_edit_rec["Excluir"] = False
-            df_edit_rec["Valor_Base"] = pd.to_numeric(df_edit_rec["Valor_Base"], errors="coerce")
-            df_edit_rec["Dia_Vencimento"] = pd.to_numeric(df_edit_rec["Dia_Vencimento"], errors="coerce").astype(int)
-            
-            col_config_rec = {"ID": None, "Excluir": st.column_config.CheckboxColumn("Excluir", default=False, width="small"), "Valor_Base": st.column_config.NumberColumn("Valor (R$)", format="%.2f"), "Dia_Vencimento": st.column_config.NumberColumn("Dia Venc.", min_value=1, max_value=31), "Tipo": st.column_config.SelectboxColumn("Tipo", options=["Saída", "Entrada"]), "Categoria": st.column_config.SelectboxColumn("Categoria", options=categorias)}
-            
-            df_editado_rec = st.data_editor(df_edit_rec, column_config=col_config_rec, use_container_width=False, num_rows="fixed", key="editor_recorrentes")
-            
-            if st.button("Salvar Alterações e Atualizar Fluxo", type="primary"):
-                df_editado_rec["Excluir"] = df_editado_rec["Excluir"].fillna(False)
-                ids_excluir = df_editado_rec[df_editado_rec["Excluir"] == True]["ID"].astype(str).tolist()
-                df_salvar = df_editado_rec[df_editado_rec["Excluir"] == False].drop(columns=["Excluir"])
-                save_data("Recorrentes", df_salvar)
-                
-                if not df_fluxo.empty and "ID" in df_fluxo.columns:
-                    df_fluxo["ID"] = df_fluxo["ID"].astype(str)
-                    df_fluxo_novo = df_fluxo.copy()
-                    df_fluxo_novo["Data_Efetivacao_dt"] = pd.to_datetime(df_fluxo_novo["Data_Efetivacao"]).dt.date
-                    hoje_date = datetime.now().date()
-                    
-                    for rec_id in ids_excluir:
-                        mascara_apagar = (df_fluxo_novo["ID"].str.startswith(f"REC_{rec_id}")) & (df_fluxo_novo["Status"] == "Previsão (Recorrente)") & (df_fluxo_novo["Data_Efetivacao_dt"] >= hoje_date)
-                        df_fluxo_novo = df_fluxo_novo[~mascara_apagar]
-                    
-                    for _, row in df_salvar.iterrows():
-                        mascara_atualizar = (df_fluxo_novo["ID"].str.startswith(f"REC_{str(row['ID'])}")) & (df_fluxo_novo["Status"] == "Previsão (Recorrente)") & (df_fluxo_novo["Data_Efetivacao_dt"] >= hoje_date)
-                        if mascara_atualizar.any():
-                            df_fluxo_novo.loc[mascara_atualizar, "Valor"] = -float(row["Valor_Base"]) if row["Tipo"] == "Saída" else float(row["Valor_Base"])
-                            df_fluxo_novo.loc[mascara_atualizar, "Descricao"] = row["Descricao"]
-                            df_fluxo_novo.loc[mascara_atualizar, "Categoria"] = row["Categoria"]
-                            df_fluxo_novo.loc[mascara_atualizar, "Tipo"] = row["Tipo"]
-                            
-                            novas_datas = []
-                            for d in pd.to_datetime(df_fluxo_novo.loc[mascara_atualizar, "Data_Efetivacao"]):
-                                novas_datas.append(datetime(d.year, d.month, min(int(row["Dia_Vencimento"]), calendar.monthrange(d.year, d.month)[1])).strftime("%Y-%m-%d"))
-                            df_fluxo_novo.loc[mascara_atualizar, "Data_Efetivacao"] = novas_datas
-
-                    save_data("Fluxo_Caixa", df_fluxo_novo.drop(columns=["Data_Efetivacao_dt"]))
-                st.success("Sincronizado com sucesso!")
-                st.rerun()
 
 # --- TELA 6: CADASTROS ---
 elif menu == "Cadastros":
