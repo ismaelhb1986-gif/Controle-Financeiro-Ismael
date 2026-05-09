@@ -325,25 +325,29 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 
 # --- FUNÇÕES AUXILIARES ---
 def get_data(sheet_name):
-    # 2. Informa qual planilha ler, usando a URL que foi salva na sessão após o login
-    return conn.read(spreadsheet=st.session_state["url_planilha"], worksheet=sheet_name, ttl=0)
+    # Aumentado o TTL para evitar limites de API (429 Rate Limit). 
+    # O save_data cuida de limpar isso garantindo atualização instantânea.
+    return conn.read(spreadsheet=st.session_state["url_planilha"], worksheet=sheet_name, ttl=600)
 
 def save_data(sheet_name, df):
-    # 3. Informa em qual planilha salvar, usando a URL da sessão
-    conn.update(spreadsheet=st.session_state["url_planilha"], worksheet=sheet_name, data=df)
+    # GSheets API recusa dados vazios (NaN/NaT) e joga um APIError (400).
+    # Preenchemos tudo com texto vazio para segurança absoluta.
+    df_safe = df.copy()
+    df_safe = df_safe.fillna("")
+    conn.update(spreadsheet=st.session_state["url_planilha"], worksheet=sheet_name, data=df_safe)
     st.cache_data.clear()
 
 def formatar_br(valor):
     """Formata valor numérico para o padrão brasileiro (ex: 1.234,56)"""
     try:
-        if pd.isna(valor): return "0,00"
+        if pd.isna(valor) or valor == "": return "0,00"
         return f"{float(valor):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     except (ValueError, TypeError):
         return "0,00"
 
 def parse_br_to_float(v):
     """Converte string editada no padrão BR de volta para número do Python"""
-    if pd.isna(v): return 0.0
+    if pd.isna(v) or v == "": return 0.0
     if isinstance(v, (int, float)): return float(v)
     v = str(v).strip()
     if not v: return 0.0
@@ -460,13 +464,13 @@ if menu == "Calendário":
     
     saldo_inicial = 0.0
     if not df_config.empty and "Saldo_Inicial" in df_config.columns:
-        if pd.notna(df_config["Saldo_Inicial"].iloc[0]):
+        if pd.notna(df_config["Saldo_Inicial"].iloc[0]) and str(df_config["Saldo_Inicial"].iloc[0]).strip() != "":
             saldo_inicial = float(df_config["Saldo_Inicial"].iloc[0])
     
     if not df_fluxo.empty and "Data_Efetivacao" in df_fluxo.columns:
         df_fluxo['Data_Efetivacao'] = pd.to_datetime(df_fluxo['Data_Efetivacao'])
         df_fluxo = df_fluxo.sort_values('Data_Efetivacao')
-        df_fluxo['Saldo_Acumulado'] = saldo_inicial + df_fluxo['Valor'].cumsum()
+        df_fluxo['Saldo_Acumulado'] = saldo_inicial + pd.to_numeric(df_fluxo['Valor'], errors='coerce').fillna(0).cumsum()
         
         calendar.setfirstweekday(calendar.SUNDAY)
         cal = calendar.monthcalendar(ano_sel, mes_sel)
@@ -488,7 +492,7 @@ if menu == "Calendário":
                     valor_saldo = df_fluxo.loc[saldo_dia, 'Saldo_Acumulado'] if saldo_dia is not None else saldo_inicial
                     
                     df_mov_dia = df_fluxo[df_fluxo['Data_Efetivacao'] == data_dia]
-                    movimento_dia = df_mov_dia['Valor'].sum() if not df_mov_dia.empty else 0.0
+                    movimento_dia = pd.to_numeric(df_mov_dia['Valor'], errors='coerce').fillna(0).sum() if not df_mov_dia.empty else 0.0
                     
                     cor_texto = "#9f1239" if valor_saldo < 0 else "#0f766e"
                     bg_cor = "#fff1f2" if valor_saldo < 0 else "#f0fdfa"
@@ -541,6 +545,7 @@ elif menu == "Lançamentos":
     if "categoria" in colunas_reais:
         nome_coluna_correto = colunas_reais["categoria"]
         categorias = df_cadastros[nome_coluna_correto].dropna().unique().tolist()
+        categorias = [c for c in categorias if str(c).strip() != ""]
     else:
         categorias = []
 
@@ -634,16 +639,19 @@ elif menu == "Relatório":
         
         f1, f2 = st.columns(2, gap="small")
         opcoes_comp = df_fluxo["Competencia"].dropna().unique().tolist()
+        opcoes_comp = [c for c in opcoes_comp if str(c).strip() != ""]
         opcoes_comp.sort(key=lambda x: datetime.strptime(x, '%m/%Y'), reverse=True)
         filtro_comp = f1.multiselect("Competência", opcoes_comp)
         
         opcoes_cat = df_fluxo["Categoria"].dropna().unique().tolist() if "Categoria" in df_fluxo.columns else []
+        opcoes_cat = [c for c in opcoes_cat if str(c).strip() != ""]
         filtro_cat = f2.multiselect("Categoria", opcoes_cat)
         
         st.markdown('<div class="filtros-anchor-2"></div>', unsafe_allow_html=True)
         
         f3, f4 = st.columns(2, gap="small")
         opcoes_origem = df_fluxo["Origem"].dropna().unique().tolist() if "Origem" in df_fluxo.columns else []
+        opcoes_origem = [c for c in opcoes_origem if str(c).strip() != ""]
         filtro_origem = f3.multiselect("Origem", opcoes_origem)
         
         opcoes_cartao = df_fluxo["Cartao"].dropna().unique().tolist() if "Cartao" in df_fluxo.columns else []
@@ -675,7 +683,7 @@ elif menu == "Relatório":
             "Excluir": st.column_config.CheckboxColumn("Excluir", default=False),
             "Data_Ocorrencia": st.column_config.DateColumn("Data Ocorrência", format="DD/MM/YYYY"),
             "Data_Efetivacao": st.column_config.DateColumn("Data Efetivação", format="DD/MM/YYYY"),
-            "Valor": st.column_config.TextColumn("Valor (R$)") # Mudou para TextColumn para exibir a vírgula certinha
+            "Valor": st.column_config.TextColumn("Valor (R$)") 
         }
 
         df_editado = st.data_editor(
@@ -723,7 +731,9 @@ elif menu == "Cartões":
     
     if "cartao" in colunas_reais and "categoria" in colunas_reais:
         cartoes = df_cadastros[colunas_reais["cartao"]].dropna().unique().tolist()
+        cartoes = [c for c in cartoes if str(c).strip() != ""]
         categorias = df_cadastros[colunas_reais["categoria"]].dropna().unique().tolist()
+        categorias = [c for c in categorias if str(c).strip() != ""]
     else:
         cartoes = []
         categorias = []
@@ -816,6 +826,7 @@ elif menu == "Recorrentes":
     df_cadastros = get_data("Cadastros")
     colunas_reais = {c.lower(): c for c in df_cadastros.columns}
     categorias = df_cadastros[colunas_reais["categoria"]].dropna().unique().tolist() if "categoria" in colunas_reais else []
+    categorias = [c for c in categorias if str(c).strip() != ""]
 
     try:
         df_recorrentes = get_data("Recorrentes")
@@ -982,7 +993,7 @@ elif menu == "Cadastros":
     df_cadastros = get_data("Cadastros")
     
     st.subheader("💰 Saldo de Partida")
-    saldo_atual = float(df_cadastros["Saldo_Inicial"].iloc[0]) if "Saldo_Inicial" in df_cadastros.columns and not df_cadastros.empty and pd.notna(df_cadastros["Saldo_Inicial"].iloc[0]) else 0.0
+    saldo_atual = float(df_cadastros["Saldo_Inicial"].iloc[0]) if "Saldo_Inicial" in df_cadastros.columns and not df_cadastros.empty and pd.notna(df_cadastros["Saldo_Inicial"].iloc[0]) and str(df_cadastros["Saldo_Inicial"].iloc[0]).strip() != "" else 0.0
     
     col_saldo, _ = st.columns([3, 7])
     novo_saldo_ini = col_saldo.number_input("Saldo Atual em Conta", value=saldo_atual)
