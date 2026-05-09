@@ -320,7 +320,7 @@ def check_password():
 if not check_password():
     st.stop()
 
-# 1. Estabelece a conexão base (Usa apenas as credenciais de acesso do Secrets)
+# 1. Estabelece a conexão base
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 # --- FUNÇÕES AUXILIARES ---
@@ -332,6 +332,26 @@ def save_data(sheet_name, df):
     # 3. Informa em qual planilha salvar, usando a URL da sessão
     conn.update(spreadsheet=st.session_state["url_planilha"], worksheet=sheet_name, data=df)
     st.cache_data.clear()
+
+def formatar_br(valor):
+    """Formata valor numérico para o padrão brasileiro (ex: 1.234,56)"""
+    try:
+        if pd.isna(valor): return "0,00"
+        return f"{float(valor):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    except (ValueError, TypeError):
+        return "0,00"
+
+def parse_br_to_float(v):
+    """Converte string editada no padrão BR de volta para número do Python"""
+    if pd.isna(v): return 0.0
+    if isinstance(v, (int, float)): return float(v)
+    v = str(v).strip()
+    if not v: return 0.0
+    v = v.replace('.', '').replace(',', '.')
+    try:
+        return float(v)
+    except Exception:
+        return 0.0
 
 # --- MENU DE NAVEGAÇÃO HORIZONTAL ---
 menu = option_menu(
@@ -484,7 +504,7 @@ if menu == "Calendário":
                         cor_mov = "#94a3b8"
                         sinal_mov = ""
                         
-                    texto_movimento = f"{sinal_mov}R$ {movimento_dia:,.2f}" if movimento_dia != 0 else "-"
+                    texto_movimento = f"{sinal_mov}R$ {formatar_br(movimento_dia)}" if movimento_dia != 0 else "-"
                     
                     html_parts.append(
                         f'<div class="calendar-cell" style="background-color:{bg_cor}; border:1px solid {borda};">'
@@ -494,7 +514,7 @@ if menu == "Calendário":
                             f'</div>'
                             f'<div class="calendar-cell-bottom">'
                                 f'<span class="calendar-saldo-label">Saldo</span><br>'
-                                f'<span class="calendar-saldo-valor" style="color:{cor_texto};">R$ {valor_saldo:,.2f}</span>'
+                                f'<span class="calendar-saldo-valor" style="color:{cor_texto};">R$ {formatar_br(valor_saldo)}</span>'
                             f'</div>'
                         f'</div>'
                     )
@@ -644,6 +664,9 @@ elif menu == "Relatório":
         df_filtrado = df_filtrado.drop(columns=["Competencia"])
         df_filtrado = df_filtrado.sort_values(by="Data_Efetivacao", ascending=False).reset_index(drop=True)
         df_filtrado.index = range(1, len(df_filtrado) + 1)
+        
+        # --- APLICA A FORMATAÇÃO BRASILEIRA NA TABELA ---
+        df_filtrado["Valor"] = df_filtrado["Valor"].apply(formatar_br)
 
         st.subheader("📋 Resultados")
         
@@ -652,7 +675,7 @@ elif menu == "Relatório":
             "Excluir": st.column_config.CheckboxColumn("Excluir", default=False),
             "Data_Ocorrencia": st.column_config.DateColumn("Data Ocorrência", format="DD/MM/YYYY"),
             "Data_Efetivacao": st.column_config.DateColumn("Data Efetivação", format="DD/MM/YYYY"),
-            "Valor": st.column_config.NumberColumn("Valor (R$)", format="%.2f")
+            "Valor": st.column_config.TextColumn("Valor (R$)") # Mudou para TextColumn para exibir a vírgula certinha
         }
 
         df_editado = st.data_editor(
@@ -664,6 +687,9 @@ elif menu == "Relatório":
         )
 
         if st.button("Salvar Alterações", type="primary"):
+            # --- CONVERTE DE VOLTA PARA NÚMERO ANTES DE SALVAR ---
+            df_editado["Valor"] = df_editado["Valor"].apply(parse_br_to_float)
+            
             df_editado["Excluir"] = df_editado["Excluir"].fillna(False)
             
             ids_excluir = df_editado[df_editado["Excluir"] == True]["ID"].tolist()
@@ -834,14 +860,26 @@ elif menu == "Recorrentes":
         if not df_recorrentes.empty:
             df_edit_rec = df_recorrentes.copy()
             df_edit_rec["Excluir"] = False
-            df_edit_rec["Valor_Base"] = pd.to_numeric(df_edit_rec["Valor_Base"], errors="coerce")
             df_edit_rec["Dia_Vencimento"] = pd.to_numeric(df_edit_rec["Dia_Vencimento"], errors="coerce").astype(int)
             
-            col_config_rec = {"ID": None, "Excluir": st.column_config.CheckboxColumn("Excluir", default=False, width="small"), "Valor_Base": st.column_config.NumberColumn("Valor (R$)", format="%.2f"), "Dia_Vencimento": st.column_config.NumberColumn("Dia Venc.", min_value=1, max_value=31), "Tipo": st.column_config.SelectboxColumn("Tipo", options=["Saída", "Entrada"]), "Categoria": st.column_config.SelectboxColumn("Categoria", options=categorias)}
+            # --- APLICA A FORMATAÇÃO BRASILEIRA NA TABELA ---
+            df_edit_rec["Valor_Base"] = df_edit_rec["Valor_Base"].apply(formatar_br)
+            
+            col_config_rec = {
+                "ID": None, 
+                "Excluir": st.column_config.CheckboxColumn("Excluir", default=False, width="small"), 
+                "Valor_Base": st.column_config.TextColumn("Valor (R$)"), # Mudou para texto
+                "Dia_Vencimento": st.column_config.NumberColumn("Dia Venc.", min_value=1, max_value=31), 
+                "Tipo": st.column_config.SelectboxColumn("Tipo", options=["Saída", "Entrada"]), 
+                "Categoria": st.column_config.SelectboxColumn("Categoria", options=categorias)
+            }
             
             df_editado_rec = st.data_editor(df_edit_rec, column_config=col_config_rec, use_container_width=False, num_rows="fixed", key="editor_recorrentes")
             
             if st.button("Salvar Alterações e Atualizar Fluxo", type="primary"):
+                # --- CONVERTE DE VOLTA PARA NÚMERO ANTES DE SALVAR ---
+                df_editado_rec["Valor_Base"] = df_editado_rec["Valor_Base"].apply(parse_br_to_float)
+                
                 df_editado_rec["Excluir"] = df_editado_rec["Excluir"].fillna(False)
                 ids_excluir = df_editado_rec[df_editado_rec["Excluir"] == True]["ID"].astype(str).tolist()
                 df_salvar = df_editado_rec[df_editado_rec["Excluir"] == False].drop(columns=["Excluir"])
@@ -881,7 +919,6 @@ elif menu == "Recorrentes":
         opcoes_itens = ["Todos"] + df_recorrentes["Descricao"].tolist() if not df_recorrentes.empty else ["Todos"]
         
         col_item, col_proj1, col_proj2, col_proj3 = st.columns([3, 2, 2, 2])
-        # AQUI USAMOS O MULTISELECT
         itens_selecionados = col_item.multiselect("Itens a Projetar", opcoes_itens, default=["Todos"])
         
         meses_projetar = col_proj1.selectbox("Qtd. de Meses", [3, 6, 12, 24, 36], index=2)
@@ -898,8 +935,6 @@ elif menu == "Recorrentes":
                 novos_lancamentos = []
                 hoje = datetime.now()
                 
-                # Se 'Todos' estiver na lista de selecionados, projeta todos.
-                # Caso contrário, filtra apenas os itens que foram selecionados no multiselect.
                 if "Todos" in itens_selecionados:
                     df_alvo = df_recorrentes
                 else:
