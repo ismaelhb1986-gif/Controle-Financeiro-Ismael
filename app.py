@@ -774,7 +774,7 @@ elif menu == "Cartões":
                                 "Data_Efetivacao": data_vencimento.strftime("%Y-%m-%d"),
                                 "Tipo": "Saída", "Categoria": cat_sel, "Descricao": desc_final,
                                 "Valor": -valor_desta_parcela, "Status": "Previsão (Fatura)",
-                                "Origem": "Cartão de Crédito", "Cartao": cartao_sel          
+                                "Origem": "Cartão de Crédito", "Cartao": cartao_sel         
                             })
                         
                         df_novos = pd.DataFrame(novos_lancamentos)
@@ -830,20 +830,31 @@ elif menu == "Recorrentes":
         st.markdown("<br>", unsafe_allow_html=True)
         st.subheader("📅 Projetar Previsões Futuras")
         
-        col_proj1, col_proj2, col_proj3, col_proj4 = st.columns([2, 2, 2, 3])
+        opcoes_itens = ["Todos"] + df_recorrentes["Descricao"].tolist() if not df_recorrentes.empty else ["Todos"]
+        
+        col_item, col_proj1, col_proj2, col_proj3 = st.columns([3, 2, 2, 2])
+        item_selecionado = col_item.selectbox("Item a Projetar", opcoes_itens)
         meses_projetar = col_proj1.selectbox("Qtd. de Meses", [3, 6, 12, 24, 36], index=2)
         mes_inicio = col_proj2.selectbox("Mês Início", list(range(1, 13)), index=datetime.now().month-1)
         ano_inicio = col_proj3.number_input("Ano Início", min_value=2020, max_value=2030, value=datetime.now().year)
         
-        col_proj4.markdown("<br>", unsafe_allow_html=True)
-        if col_proj4.button("🚀 Injetar Previsões", type="primary", use_container_width=True):
-            if df_recorrentes.empty: st.warning("Cadastre itens primeiro.")
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("🚀 Injetar Previsões", type="primary", use_container_width=True):
+            if df_recorrentes.empty:
+                st.warning("Cadastre itens primeiro.")
             else:
                 novos_lancamentos = []
                 hoje = datetime.now()
-                for _, row in df_recorrentes.iterrows():
-                    try: dia_venc = int(float(row["Dia_Vencimento"])); valor_base = float(row["Valor_Base"]); rec_id = str(row["ID"])
-                    except: continue 
+                
+                df_alvo = df_recorrentes if item_selecionado == "Todos" else df_recorrentes[df_recorrentes["Descricao"] == item_selecionado]
+                
+                for _, row in df_alvo.iterrows():
+                    try:
+                        dia_venc = int(float(row["Dia_Vencimento"]))
+                        valor_base = float(row["Valor_Base"])
+                        rec_id = str(row["ID"])
+                    except:
+                        continue 
                     
                     valor_final = -valor_base if row["Tipo"] == "Saída" else valor_base
                     for i in range(meses_projetar):
@@ -854,12 +865,24 @@ elif menu == "Recorrentes":
                         id_rastreavel = f"REC_{rec_id}_{ano_alvo}{mes_alvo:02d}"
                         
                         if not (not df_fluxo.empty and "ID" in df_fluxo.columns and id_rastreavel in df_fluxo["ID"].values):
-                            novos_lancamentos.append({"ID": id_rastreavel, "Data_Ocorrencia": hoje.strftime("%Y-%m-%d"), "Data_Efetivacao": datetime(ano_alvo, mes_alvo, dia_efetivo).strftime("%Y-%m-%d"), "Tipo": row["Tipo"], "Categoria": row["Categoria"], "Descricao": row["Descricao"], "Valor": valor_final, "Status": "Previsão (Recorrente)", "Origem": "Recorrente", "Cartao": ""})
+                            novos_lancamentos.append({
+                                "ID": id_rastreavel, 
+                                "Data_Ocorrencia": hoje.strftime("%Y-%m-%d"), 
+                                "Data_Efetivacao": datetime(ano_alvo, mes_alvo, dia_efetivo).strftime("%Y-%m-%d"), 
+                                "Tipo": row["Tipo"], 
+                                "Categoria": row["Categoria"], 
+                                "Descricao": row["Descricao"], 
+                                "Valor": valor_final, 
+                                "Status": "Previsão (Recorrente)", 
+                                "Origem": "Recorrente", 
+                                "Cartao": ""
+                            })
                 if novos_lancamentos:
                     df_fluxo_atualizado = pd.concat([df_fluxo, pd.DataFrame(novos_lancamentos)], ignore_index=True) if not df_fluxo.empty else pd.DataFrame(novos_lancamentos)
                     save_data("Fluxo_Caixa", df_fluxo_atualizado)
                     st.success(f"✅ {len(novos_lancamentos)} previsões criadas!")
-                else: st.info("As previsões para este período já estavam projetadas.")
+                else:
+                    st.info("As previsões para este período já estavam projetadas.")
 
         st.markdown("---")
         st.subheader("📋 Editar Catálogo")
