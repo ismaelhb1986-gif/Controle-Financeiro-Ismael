@@ -828,7 +828,7 @@ elif menu == "Recorrentes":
                         st.success("Item salvo no catálogo!")
                         st.rerun()
 
-        # 2. BLOCO: EDITAR CATÁLOGO (Movido para o meio)
+        # 2. BLOCO: EDITAR CATÁLOGO
         st.markdown("---")
         st.subheader("📋 Editar Catálogo")
         if not df_recorrentes.empty:
@@ -874,14 +874,16 @@ elif menu == "Recorrentes":
                 st.success("Sincronizado com sucesso!")
                 st.rerun()
 
-        # 3. BLOCO: INJETAR PREVISÕES (Movido para o final)
+        # 3. BLOCO: INJETAR PREVISÕES
         st.markdown("---")
         st.subheader("📅 Projetar Previsões Futuras")
         
         opcoes_itens = ["Todos"] + df_recorrentes["Descricao"].tolist() if not df_recorrentes.empty else ["Todos"]
         
         col_item, col_proj1, col_proj2, col_proj3 = st.columns([3, 2, 2, 2])
-        item_selecionado = col_item.selectbox("Item a Projetar", opcoes_itens)
+        # AQUI USAMOS O MULTISELECT
+        itens_selecionados = col_item.multiselect("Itens a Projetar", opcoes_itens, default=["Todos"])
+        
         meses_projetar = col_proj1.selectbox("Qtd. de Meses", [3, 6, 12, 24, 36], index=2)
         mes_inicio = col_proj2.selectbox("Mês Início", list(range(1, 13)), index=datetime.now().month-1)
         ano_inicio = col_proj3.number_input("Ano Início", min_value=2020, max_value=2030, value=datetime.now().year)
@@ -890,11 +892,18 @@ elif menu == "Recorrentes":
         if st.button("🚀 Injetar Previsões", type="primary", use_container_width=True):
             if df_recorrentes.empty:
                 st.warning("Cadastre itens primeiro.")
+            elif not itens_selecionados:
+                st.warning("Por favor, selecione pelo menos um item ou 'Todos'.")
             else:
                 novos_lancamentos = []
                 hoje = datetime.now()
                 
-                df_alvo = df_recorrentes if item_selecionado == "Todos" else df_recorrentes[df_recorrentes["Descricao"] == item_selecionado]
+                # Se 'Todos' estiver na lista de selecionados, projeta todos.
+                # Caso contrário, filtra apenas os itens que foram selecionados no multiselect.
+                if "Todos" in itens_selecionados:
+                    df_alvo = df_recorrentes
+                else:
+                    df_alvo = df_recorrentes[df_recorrentes["Descricao"].isin(itens_selecionados)]
                 
                 for _, row in df_alvo.iterrows():
                     try:
