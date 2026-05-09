@@ -552,7 +552,6 @@ elif menu == "Lançamentos":
                 
                 valor = c2.number_input("Valor (R$)", min_value=0.01, step=10.0, value=None, format="%.2f")
                 
-                # ADICIONADO: index=None e placeholder para transformar em barra de busca
                 cat = c2.selectbox("Categoria", categorias, index=None, placeholder="🔍 Digite para buscar...")
                 
                 desc = st.text_input("Descrição")
@@ -739,11 +738,10 @@ elif menu == "Cartões":
                 colA, colB = st.columns(2)
                 data_compra = colA.date_input("Data da Compra", datetime.now(), format="DD/MM/YYYY")
                 
-                # ADICIONADO: index=None e placeholder
-                cartao_sel = colB.selectbox("Cartão", cartoes, index=None, placeholder="🔍 Selecione o Cartão...")
+                # ADICIONADO: Removemos o index=None para o cartão voltar a selecionar o 1º automaticamente
+                cartao_sel = colB.selectbox("Cartão", cartoes)
                 
                 c1, c2 = st.columns(2)
-                # ADICIONADO: index=None e placeholder
                 cat_sel = c1.selectbox("Categoria", categorias, index=None, placeholder="🔍 Digite para buscar...")
                 desc = c2.text_input("Descrição da Compra (Opcional)")
                 
@@ -751,26 +749,24 @@ elif menu == "Cartões":
                 valor_total = c3.number_input("Valor Total (R$)", min_value=0.01, step=50.0, value=None, format="%.2f")
                 parcelas = c4.number_input("Qtd. Parcelas", min_value=1, max_value=72, value=1, step=1)
                 
-                # Só calcula previsões se o cartão já estiver selecionado para evitar erro
-                sug_m, sug_y = datetime.now().month, datetime.now().year
-                if cartao_sel:
-                    cartao_info = df_cadastros[df_cadastros[colunas_reais["cartao"]] == cartao_sel]
-                    col_melhor_dia = colunas_reais.get("melhor_dia_compra", "melhor_dia_compra")
-                    col_vencimento = colunas_reais.get("vencimento_cartao", "vencimento_cartao")
-                    
-                    try: melhor_dia = int(cartao_info[col_melhor_dia].iloc[0])
-                    except: melhor_dia = 15 
-                    try: dia_vencimento_sug = int(cartao_info[col_vencimento].iloc[0])
-                    except: dia_vencimento_sug = 10 
-                    
-                    d = data_compra.day
-                    m = data_compra.month
-                    y = data_compra.year
-                    
-                    offset = 1 if (melhor_dia < dia_vencimento_sug and d >= melhor_dia) else (2 if d >= melhor_dia else 1)
-                    sug_m, sug_y = m + offset, y
-                    if sug_m > 12: sug_m -= 12; sug_y += 1
-                    elif sug_m > 24: sug_m -= 24; sug_y += 2
+                # A lógica agora funciona direto pois cartao_sel sempre tem um valor por padrão
+                cartao_info = df_cadastros[df_cadastros[colunas_reais["cartao"]] == cartao_sel]
+                col_melhor_dia = colunas_reais.get("melhor_dia_compra", "melhor_dia_compra")
+                col_vencimento = colunas_reais.get("vencimento_cartao", "vencimento_cartao")
+                
+                try: melhor_dia = int(cartao_info[col_melhor_dia].iloc[0])
+                except: melhor_dia = 15 
+                try: dia_vencimento_sug = int(cartao_info[col_vencimento].iloc[0])
+                except: dia_vencimento_sug = 10 
+                
+                d = data_compra.day
+                m = data_compra.month
+                y = data_compra.year
+                
+                offset = 1 if (melhor_dia < dia_vencimento_sug and d >= melhor_dia) else (2 if d >= melhor_dia else 1)
+                sug_m, sug_y = m + offset, y
+                if sug_m > 12: sug_m -= 12; sug_y += 1
+                elif sug_m > 24: sug_m -= 24; sug_y += 2
 
                 c5, c6 = st.columns(2)
                 mes_comp = c5.selectbox("Mês da 1ª Parcela", list(range(1, 13)), index=sug_m-1)
@@ -780,8 +776,8 @@ elif menu == "Cartões":
                 submit = st.form_submit_button("Lançar Fatura", type="primary", use_container_width=True)
                 
                 if submit:
-                    if valor_total is None or cartao_sel is None or cat_sel is None:
-                        st.error("Por favor, preencha o Valor Total, Cartão e Categoria.")
+                    if valor_total is None or cat_sel is None:
+                        st.error("Por favor, preencha o Valor Total e a Categoria.")
                     else:
                         valor_parcela_base = round(valor_total / parcelas, 2)
                         diferenca_centavos = round(valor_total - (valor_parcela_base * parcelas), 2)
@@ -844,7 +840,6 @@ elif menu == "Recorrentes":
                 c1, c2 = st.columns(2)
                 desc_rec = c1.text_input("Descrição (Ex: Aluguel)")
                 
-                # ADICIONADO: index=None e placeholder
                 cat_rec = c2.selectbox("Categoria", categorias, index=None, placeholder="🔍 Digite para buscar...")
                 
                 c3, c4, c5 = st.columns([2, 2, 2])
@@ -926,7 +921,6 @@ elif menu == "Recorrentes":
         opcoes_itens = ["Todos"] + df_recorrentes["Descricao"].tolist() if not df_recorrentes.empty else ["Todos"]
         
         col_item, col_proj1, col_proj2, col_proj3 = st.columns([3, 2, 2, 2])
-        # ADICIONADO: Placeholder no multiselect
         itens_selecionados = col_item.multiselect("Itens a Projetar", opcoes_itens, default=["Todos"], placeholder="🔍 Escolha ou digite...")
         
         meses_projetar = col_proj1.selectbox("Qtd. de Meses", [3, 6, 12, 24, 36], index=2)
@@ -981,7 +975,6 @@ elif menu == "Recorrentes":
                     df_fluxo_atualizado = pd.concat([df_fluxo, pd.DataFrame(novos_lancamentos)], ignore_index=True) if not df_fluxo.empty else pd.DataFrame(novos_lancamentos)
                     save_data("Fluxo_Caixa", df_fluxo_atualizado)
                     
-                    # ADICIONADO: Mensagem dupla de sucesso! (Toast no canto + Banner central)
                     st.toast(f"✅ {len(novos_lancamentos)} previsões criadas com sucesso!", icon="🎉")
                     st.success(f"✅ Sucesso! {len(novos_lancamentos)} previsões foram geradas no seu Fluxo de Caixa. Acesse a aba 'Calendário' ou 'Relatório' para visualizar.")
                 else:
