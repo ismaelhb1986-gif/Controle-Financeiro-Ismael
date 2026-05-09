@@ -242,7 +242,6 @@ def get_auth_token(senha):
 def password_entered():
     senha_digitada = st.session_state.get("password", "")
     
-    # Verifica de quem é a senha e salva a URL correspondente na sessão
     if senha_digitada == st.secrets["senhas"]["senha_pessoal"]:
         st.session_state["password_correct"] = True
         st.session_state["url_planilha"] = st.secrets["planilhas"]["url_pessoal"]
@@ -258,7 +257,6 @@ def password_entered():
         del st.session_state["password"]
 
 def render_login_screen(error_message=None):
-    """Renderiza a tela de login (campo + opcional mensagem de erro + footer com timestamp)."""
     st.markdown("<h2 style='text-align: center; color: #0f766e;'>🔒 Acesso Restrito</h2>", unsafe_allow_html=True)
     _, col_center, _ = st.columns([4, 3, 4])
     with col_center:
@@ -292,24 +290,20 @@ def render_login_screen(error_message=None):
     )
 
 def check_password():
-    """Retorna True se autenticado e mapeia a planilha correta caso seja via URL token."""
     if st.session_state.get("password_correct") is True:
         return True
     
     token_url = st.query_params.get("auth", "")
     if token_url:
-        # Checa se o token da URL bate com o token da sua senha pessoal
         if token_url == get_auth_token(st.secrets["senhas"]["senha_pessoal"]):
             st.session_state["password_correct"] = True
             st.session_state["url_planilha"] = st.secrets["planilhas"]["url_pessoal"]
             return True
-        # Checa se o token da URL bate com o token da Maqueli
         elif token_url == get_auth_token(st.secrets["senhas"]["senha_maqueli"]):
             st.session_state["password_correct"] = True
             st.session_state["url_planilha"] = st.secrets["planilhas"]["url_maqueli"]
             return True
 
-    # Não autenticado: mostra tela de login
     st.markdown("<br><br><br>", unsafe_allow_html=True)
     if st.session_state.get("password_correct") is False:
         render_login_screen(error_message="😕 Senha incorreta. Tente novamente.")
@@ -325,20 +319,15 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 
 # --- FUNÇÕES AUXILIARES ---
 def get_data(sheet_name):
-    # Aumentado o TTL para evitar limites de API (429 Rate Limit). 
-    # O save_data cuida de limpar isso garantindo atualização instantânea.
     return conn.read(spreadsheet=st.session_state["url_planilha"], worksheet=sheet_name, ttl=600)
 
 def save_data(sheet_name, df):
-    # GSheets API recusa dados vazios (NaN/NaT) e joga um APIError (400).
-    # Preenchemos tudo com texto vazio para segurança absoluta.
     df_safe = df.copy()
     df_safe = df_safe.fillna("")
     conn.update(spreadsheet=st.session_state["url_planilha"], worksheet=sheet_name, data=df_safe)
     st.cache_data.clear()
 
 def formatar_br(valor):
-    """Formata valor numérico para o padrão brasileiro (ex: 1.234,56)"""
     try:
         if pd.isna(valor) or valor == "": return "0,00"
         return f"{float(valor):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
@@ -346,7 +335,6 @@ def formatar_br(valor):
         return "0,00"
 
 def parse_br_to_float(v):
-    """Converte string editada no padrão BR de volta para número do Python"""
     if pd.isna(v) or v == "": return 0.0
     if isinstance(v, (int, float)): return float(v)
     v = str(v).strip()
@@ -563,14 +551,16 @@ elif menu == "Lançamentos":
                 tipo = c1.selectbox("Tipo", ["Saída", "Entrada"])
                 
                 valor = c2.number_input("Valor (R$)", min_value=0.01, step=10.0, value=None, format="%.2f")
-                cat = c2.selectbox("Categoria", categorias)
+                
+                # ADICIONADO: index=None e placeholder para transformar em barra de busca
+                cat = c2.selectbox("Categoria", categorias, index=None, placeholder="🔍 Digite para buscar...")
                 
                 desc = st.text_input("Descrição")
                 
                 st.markdown("<br>", unsafe_allow_html=True)
                 if st.form_submit_button("Salvar Registro", type="primary", use_container_width=True):
-                    if valor is None:
-                        st.error("Por favor, preencha o campo Valor.")
+                    if valor is None or cat is None:
+                        st.error("Por favor, preencha o Valor e a Categoria.")
                     else:
                         valor_final = -valor if tipo == "Saída" else valor
                         novo = pd.DataFrame([{
@@ -591,6 +581,7 @@ elif menu == "Lançamentos":
                         else:
                             df_atualizado = pd.concat([df_atual, novo], ignore_index=True)
                         save_data("Fluxo_Caixa", df_atualizado)
+                        st.toast("✅ Lançamento registrado com sucesso!", icon="💸")
                         st.success("Lançado com sucesso!")
 
 # --- TELA 3: RELATÓRIO (EXTRATO / EDIÇÃO) ---
@@ -641,22 +632,22 @@ elif menu == "Relatório":
         opcoes_comp = df_fluxo["Competencia"].dropna().unique().tolist()
         opcoes_comp = [c for c in opcoes_comp if str(c).strip() != ""]
         opcoes_comp.sort(key=lambda x: datetime.strptime(x, '%m/%Y'), reverse=True)
-        filtro_comp = f1.multiselect("Competência", opcoes_comp)
+        filtro_comp = f1.multiselect("Competência", opcoes_comp, placeholder="Selecione...")
         
         opcoes_cat = df_fluxo["Categoria"].dropna().unique().tolist() if "Categoria" in df_fluxo.columns else []
         opcoes_cat = [c for c in opcoes_cat if str(c).strip() != ""]
-        filtro_cat = f2.multiselect("Categoria", opcoes_cat)
+        filtro_cat = f2.multiselect("Categoria", opcoes_cat, placeholder="Selecione...")
         
         st.markdown('<div class="filtros-anchor-2"></div>', unsafe_allow_html=True)
         
         f3, f4 = st.columns(2, gap="small")
         opcoes_origem = df_fluxo["Origem"].dropna().unique().tolist() if "Origem" in df_fluxo.columns else []
         opcoes_origem = [c for c in opcoes_origem if str(c).strip() != ""]
-        filtro_origem = f3.multiselect("Origem", opcoes_origem)
+        filtro_origem = f3.multiselect("Origem", opcoes_origem, placeholder="Selecione...")
         
         opcoes_cartao = df_fluxo["Cartao"].dropna().unique().tolist() if "Cartao" in df_fluxo.columns else []
         opcoes_cartao = [c for c in opcoes_cartao if str(c).strip() != ""]
-        filtro_cartao = f4.multiselect("Cartão", opcoes_cartao)
+        filtro_cartao = f4.multiselect("Cartão", opcoes_cartao, placeholder="Selecione...")
 
         df_filtrado = df_fluxo.copy()
         
@@ -673,7 +664,6 @@ elif menu == "Relatório":
         df_filtrado = df_filtrado.sort_values(by="Data_Efetivacao", ascending=False).reset_index(drop=True)
         df_filtrado.index = range(1, len(df_filtrado) + 1)
         
-        # --- APLICA A FORMATAÇÃO BRASILEIRA NA TABELA ---
         df_filtrado["Valor"] = df_filtrado["Valor"].apply(formatar_br)
 
         st.subheader("📋 Resultados")
@@ -695,7 +685,6 @@ elif menu == "Relatório":
         )
 
         if st.button("Salvar Alterações", type="primary"):
-            # --- CONVERTE DE VOLTA PARA NÚMERO ANTES DE SALVAR ---
             df_editado["Valor"] = df_editado["Valor"].apply(parse_br_to_float)
             
             df_editado["Excluir"] = df_editado["Excluir"].fillna(False)
@@ -749,33 +738,39 @@ elif menu == "Cartões":
                 
                 colA, colB = st.columns(2)
                 data_compra = colA.date_input("Data da Compra", datetime.now(), format="DD/MM/YYYY")
-                cartao_sel = colB.selectbox("Cartão", cartoes)
+                
+                # ADICIONADO: index=None e placeholder
+                cartao_sel = colB.selectbox("Cartão", cartoes, index=None, placeholder="🔍 Selecione o Cartão...")
                 
                 c1, c2 = st.columns(2)
-                cat_sel = c1.selectbox("Categoria", categorias)
+                # ADICIONADO: index=None e placeholder
+                cat_sel = c1.selectbox("Categoria", categorias, index=None, placeholder="🔍 Digite para buscar...")
                 desc = c2.text_input("Descrição da Compra (Opcional)")
                 
                 c3, c4 = st.columns(2)
                 valor_total = c3.number_input("Valor Total (R$)", min_value=0.01, step=50.0, value=None, format="%.2f")
                 parcelas = c4.number_input("Qtd. Parcelas", min_value=1, max_value=72, value=1, step=1)
                 
-                cartao_info = df_cadastros[df_cadastros[colunas_reais["cartao"]] == cartao_sel]
-                col_melhor_dia = colunas_reais.get("melhor_dia_compra", "melhor_dia_compra")
-                col_vencimento = colunas_reais.get("vencimento_cartao", "vencimento_cartao")
-                
-                try: melhor_dia = int(cartao_info[col_melhor_dia].iloc[0])
-                except: melhor_dia = 15 
-                try: dia_vencimento_sug = int(cartao_info[col_vencimento].iloc[0])
-                except: dia_vencimento_sug = 10 
-                
-                d = data_compra.day
-                m = data_compra.month
-                y = data_compra.year
-                
-                offset = 1 if (melhor_dia < dia_vencimento_sug and d >= melhor_dia) else (2 if d >= melhor_dia else 1)
-                sug_m, sug_y = m + offset, y
-                if sug_m > 12: sug_m -= 12; sug_y += 1
-                elif sug_m > 24: sug_m -= 24; sug_y += 2
+                # Só calcula previsões se o cartão já estiver selecionado para evitar erro
+                sug_m, sug_y = datetime.now().month, datetime.now().year
+                if cartao_sel:
+                    cartao_info = df_cadastros[df_cadastros[colunas_reais["cartao"]] == cartao_sel]
+                    col_melhor_dia = colunas_reais.get("melhor_dia_compra", "melhor_dia_compra")
+                    col_vencimento = colunas_reais.get("vencimento_cartao", "vencimento_cartao")
+                    
+                    try: melhor_dia = int(cartao_info[col_melhor_dia].iloc[0])
+                    except: melhor_dia = 15 
+                    try: dia_vencimento_sug = int(cartao_info[col_vencimento].iloc[0])
+                    except: dia_vencimento_sug = 10 
+                    
+                    d = data_compra.day
+                    m = data_compra.month
+                    y = data_compra.year
+                    
+                    offset = 1 if (melhor_dia < dia_vencimento_sug and d >= melhor_dia) else (2 if d >= melhor_dia else 1)
+                    sug_m, sug_y = m + offset, y
+                    if sug_m > 12: sug_m -= 12; sug_y += 1
+                    elif sug_m > 24: sug_m -= 24; sug_y += 2
 
                 c5, c6 = st.columns(2)
                 mes_comp = c5.selectbox("Mês da 1ª Parcela", list(range(1, 13)), index=sug_m-1)
@@ -785,8 +780,8 @@ elif menu == "Cartões":
                 submit = st.form_submit_button("Lançar Fatura", type="primary", use_container_width=True)
                 
                 if submit:
-                    if valor_total is None:
-                        st.error("Por favor, preencha o Valor Total da Compra.")
+                    if valor_total is None or cartao_sel is None or cat_sel is None:
+                        st.error("Por favor, preencha o Valor Total, Cartão e Categoria.")
                     else:
                         valor_parcela_base = round(valor_total / parcelas, 2)
                         diferenca_centavos = round(valor_total - (valor_parcela_base * parcelas), 2)
@@ -817,6 +812,7 @@ elif menu == "Cartões":
                         df_atual = get_data("Fluxo_Caixa")
                         df_atualizado = df_novos if df_atual.empty else pd.concat([df_atual, df_novos], ignore_index=True)
                         save_data("Fluxo_Caixa", df_atualizado)
+                        st.toast("✅ Compra de cartão registrada com sucesso!", icon="💳")
                         st.success(f"Compra registrada! {parcelas} parcela(s) lançada(s) com sucesso.")
 
 # --- TELA 5: RECORRENTES ---
@@ -847,7 +843,9 @@ elif menu == "Recorrentes":
                 st.markdown("<h3 style='text-align:center; color:#334155; font-family:Poppins; margin-bottom:20px; font-size:18px;'>Nova Conta Recorrente</h3>", unsafe_allow_html=True)
                 c1, c2 = st.columns(2)
                 desc_rec = c1.text_input("Descrição (Ex: Aluguel)")
-                cat_rec = c2.selectbox("Categoria", categorias)
+                
+                # ADICIONADO: index=None e placeholder
+                cat_rec = c2.selectbox("Categoria", categorias, index=None, placeholder="🔍 Digite para buscar...")
                 
                 c3, c4, c5 = st.columns([2, 2, 2])
                 tipo_rec = c3.selectbox("Tipo", ["Saída", "Entrada"])
@@ -856,8 +854,8 @@ elif menu == "Recorrentes":
                 
                 st.markdown("<br>", unsafe_allow_html=True)
                 if st.form_submit_button("Salvar no Catálogo", type="primary", use_container_width=True):
-                    if not desc_rec or valor_rec is None:
-                        st.error("Preencha a Descrição e o Valor Base.")
+                    if not desc_rec or valor_rec is None or cat_rec is None:
+                        st.error("Preencha a Descrição, Valor Base e Categoria.")
                     else:
                         novo_rec = pd.DataFrame([{"ID": datetime.now().strftime("%Y%m%d%H%M%S"), "Descricao": desc_rec, "Categoria": cat_rec, "Tipo": tipo_rec, "Valor_Base": valor_rec, "Dia_Vencimento": dia_venc}])
                         df_recorrentes = pd.concat([df_recorrentes, novo_rec], ignore_index=True)
@@ -873,13 +871,12 @@ elif menu == "Recorrentes":
             df_edit_rec["Excluir"] = False
             df_edit_rec["Dia_Vencimento"] = pd.to_numeric(df_edit_rec["Dia_Vencimento"], errors="coerce").astype(int)
             
-            # --- APLICA A FORMATAÇÃO BRASILEIRA NA TABELA ---
             df_edit_rec["Valor_Base"] = df_edit_rec["Valor_Base"].apply(formatar_br)
             
             col_config_rec = {
                 "ID": None, 
                 "Excluir": st.column_config.CheckboxColumn("Excluir", default=False, width="small"), 
-                "Valor_Base": st.column_config.TextColumn("Valor (R$)"), # Mudou para texto
+                "Valor_Base": st.column_config.TextColumn("Valor (R$)"),
                 "Dia_Vencimento": st.column_config.NumberColumn("Dia Venc.", min_value=1, max_value=31), 
                 "Tipo": st.column_config.SelectboxColumn("Tipo", options=["Saída", "Entrada"]), 
                 "Categoria": st.column_config.SelectboxColumn("Categoria", options=categorias)
@@ -888,7 +885,6 @@ elif menu == "Recorrentes":
             df_editado_rec = st.data_editor(df_edit_rec, column_config=col_config_rec, use_container_width=False, num_rows="fixed", key="editor_recorrentes")
             
             if st.button("Salvar Alterações e Atualizar Fluxo", type="primary"):
-                # --- CONVERTE DE VOLTA PARA NÚMERO ANTES DE SALVAR ---
                 df_editado_rec["Valor_Base"] = df_editado_rec["Valor_Base"].apply(parse_br_to_float)
                 
                 df_editado_rec["Excluir"] = df_editado_rec["Excluir"].fillna(False)
@@ -930,7 +926,8 @@ elif menu == "Recorrentes":
         opcoes_itens = ["Todos"] + df_recorrentes["Descricao"].tolist() if not df_recorrentes.empty else ["Todos"]
         
         col_item, col_proj1, col_proj2, col_proj3 = st.columns([3, 2, 2, 2])
-        itens_selecionados = col_item.multiselect("Itens a Projetar", opcoes_itens, default=["Todos"])
+        # ADICIONADO: Placeholder no multiselect
+        itens_selecionados = col_item.multiselect("Itens a Projetar", opcoes_itens, default=["Todos"], placeholder="🔍 Escolha ou digite...")
         
         meses_projetar = col_proj1.selectbox("Qtd. de Meses", [3, 6, 12, 24, 36], index=2)
         mes_inicio = col_proj2.selectbox("Mês Início", list(range(1, 13)), index=datetime.now().month-1)
@@ -983,9 +980,13 @@ elif menu == "Recorrentes":
                 if novos_lancamentos:
                     df_fluxo_atualizado = pd.concat([df_fluxo, pd.DataFrame(novos_lancamentos)], ignore_index=True) if not df_fluxo.empty else pd.DataFrame(novos_lancamentos)
                     save_data("Fluxo_Caixa", df_fluxo_atualizado)
-                    st.success(f"✅ {len(novos_lancamentos)} previsões criadas!")
+                    
+                    # ADICIONADO: Mensagem dupla de sucesso! (Toast no canto + Banner central)
+                    st.toast(f"✅ {len(novos_lancamentos)} previsões criadas com sucesso!", icon="🎉")
+                    st.success(f"✅ Sucesso! {len(novos_lancamentos)} previsões foram geradas no seu Fluxo de Caixa. Acesse a aba 'Calendário' ou 'Relatório' para visualizar.")
                 else:
-                    st.info("As previsões para este período já estavam projetadas.")
+                    st.toast("ℹ️ As previsões já estavam em dia.", icon="ℹ️")
+                    st.info("As previsões para os itens e período selecionados já estavam projetadas no seu fluxo de caixa.")
 
 # --- TELA 6: CADASTROS ---
 elif menu == "Cadastros":
