@@ -485,7 +485,7 @@ if menu == "Calendário":
                     borda = "#fecdd3" if valor_saldo < 0 else "#ccfbf1"
                     
                     if movimento_dia > 0:
-                        cor_mov = "#059669"
+                        cor_mov = "#2563eb"  # ← ALTERADO: azul para entradas
                         sinal_mov = "+"
                     elif movimento_dia < 0:
                         cor_mov = "#e11d48"
