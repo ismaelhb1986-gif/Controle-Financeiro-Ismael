@@ -218,26 +218,36 @@ st.markdown("""
         }
 
         /* --- 9. GRADE 2x2 DE FILTROS (RELATÓRIO) ---
-           Força as duas linhas de st.columns a exibirem sempre 2 colunas
-           lado a lado, mesmo em telas estreitas de celular. */
-        .filtros-grid-wrapper > div[data-testid="stHorizontalBlock"] {
-            display: flex !important;
+           O Streamlit no mobile força flex-direction:column nos stHorizontalBlock.
+           Usamos o elemento âncora #filtros-relatorio para identificar os dois
+           stHorizontalBlock imediatamente seguintes e sobrescrever esse comportamento. */
+
+        /* Seleciona qualquer stHorizontalBlock que venha depois do nosso marcador */
+        #filtros-relatorio ~ div[data-testid="stHorizontalBlock"],
+        #filtros-relatorio ~ * div[data-testid="stHorizontalBlock"] {
             flex-direction: row !important;
             flex-wrap: nowrap !important;
             gap: 10px !important;
         }
-        .filtros-grid-wrapper > div[data-testid="stHorizontalBlock"] > div[data-testid="column"],
-        .filtros-grid-wrapper > div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {
+
+        /* Cada coluna dentro dessas linhas ocupa exatamente 50% */
+        #filtros-relatorio ~ div[data-testid="stHorizontalBlock"] [data-testid="stColumn"],
+        #filtros-relatorio ~ div[data-testid="stHorizontalBlock"] [data-testid="column"],
+        #filtros-relatorio ~ * div[data-testid="stHorizontalBlock"] [data-testid="stColumn"],
+        #filtros-relatorio ~ * div[data-testid="stHorizontalBlock"] [data-testid="column"] {
             flex: 1 1 50% !important;
             width: 50% !important;
             min-width: 0 !important;
             max-width: 50% !important;
         }
-        /* Evita que tags de seleção selecionadas transbordem a coluna */
-        .filtros-grid-wrapper div[data-baseweb="select"] {
+
+        /* Impede overflow dos multiselects dentro dos filtros */
+        #filtros-relatorio ~ div[data-testid="stHorizontalBlock"] div[data-baseweb="select"],
+        #filtros-relatorio ~ * div[data-testid="stHorizontalBlock"] div[data-baseweb="select"] {
             min-width: 0 !important;
         }
-        .filtros-grid-wrapper span[title] {
+        #filtros-relatorio ~ div[data-testid="stHorizontalBlock"] span[title],
+        #filtros-relatorio ~ * div[data-testid="stHorizontalBlock"] span[title] {
             overflow: hidden !important;
             text-overflow: ellipsis !important;
             white-space: nowrap !important;
@@ -630,8 +640,8 @@ elif menu == "Relatório":
         # Competência atual para uso como valor padrão
         competencia_atual = datetime.now().strftime('%m/%Y')
 
-        # ── Abre o wrapper que força layout 2 colunas em qualquer tela ──
-        st.markdown('<div class="filtros-grid-wrapper">', unsafe_allow_html=True)
+        # Âncora invisível usada pelo CSS (~) para localizar os filtros no DOM
+        st.markdown('<span id="filtros-relatorio" style="display:none"></span>', unsafe_allow_html=True)
 
         # Linha 1 de filtros: Competência | Categoria
         f1, f2 = st.columns(2, gap="small")
@@ -664,9 +674,6 @@ elif menu == "Relatório":
         opcoes_cartao = df_fluxo["Cartao"].dropna().unique().tolist() if "Cartao" in df_fluxo.columns else []
         opcoes_cartao = [c for c in opcoes_cartao if str(c).strip() != ""]
         filtro_cartao = f4.multiselect("Cartão", opcoes_cartao, placeholder="Selecione...")
-
-        # ── Fecha o wrapper ──
-        st.markdown('</div>', unsafe_allow_html=True)
 
         df_filtrado = df_fluxo.copy()
         
