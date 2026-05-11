@@ -114,13 +114,12 @@ st.markdown("""
             box-shadow: 0 4px 6px -1px rgba(15, 118, 110, 0.4) !important;
         }
 
-        /* --- 8. CALENDÁRIO RESPONSIVO COM ROLAGEM HORIZONTAL (NOVO) --- */
+        /* --- 8. CALENDÁRIO RESPONSIVO COM ROLAGEM HORIZONTAL --- */
         .calendar-scroll-wrapper {
             width: 100%;
             overflow-x: auto;
             -webkit-overflow-scrolling: touch;
             padding-bottom: 12px;
-            /* Cria uma "pista de rolagem" sutil para indicar que dá para deslizar */
             scrollbar-width: thin;
             scrollbar-color: #cbd5e1 #f1f5f9;
         }
@@ -140,7 +139,6 @@ st.markdown("""
             display: grid;
             grid-template-columns: repeat(7, minmax(135px, 1fr));
             gap: 10px;
-            /* Garante que no desktop ocupe 100%, mas no mobile force a largura mínima das 7 colunas */
             min-width: 945px;
         }
         
@@ -203,7 +201,6 @@ st.markdown("""
             font-family: 'Inter', sans-serif;
         }
 
-        /* No celular, reduz um pouco a fonte interna das células para caber melhor */
         @media (max-width: 768px) {
             .calendar-grid {
                 grid-template-columns: repeat(7, 120px);
@@ -218,6 +215,33 @@ st.markdown("""
             .calendar-movement { font-size: 10px; }
             .calendar-saldo-valor { font-size: 12px; }
             .calendar-saldo-label { font-size: 9px; }
+        }
+
+        /* --- 9. GRADE 2x2 DE FILTROS (RELATÓRIO) ---
+           Força as duas linhas de st.columns a exibirem sempre 2 colunas
+           lado a lado, mesmo em telas estreitas de celular. */
+        .filtros-grid-wrapper > div[data-testid="stHorizontalBlock"] {
+            display: flex !important;
+            flex-direction: row !important;
+            flex-wrap: nowrap !important;
+            gap: 10px !important;
+        }
+        .filtros-grid-wrapper > div[data-testid="stHorizontalBlock"] > div[data-testid="column"],
+        .filtros-grid-wrapper > div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {
+            flex: 1 1 50% !important;
+            width: 50% !important;
+            min-width: 0 !important;
+            max-width: 50% !important;
+        }
+        /* Evita que tags de seleção selecionadas transbordem a coluna */
+        .filtros-grid-wrapper div[data-baseweb="select"] {
+            min-width: 0 !important;
+        }
+        .filtros-grid-wrapper span[title] {
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+            white-space: nowrap !important;
+            max-width: 90px !important;
         }
     </style>
 """, unsafe_allow_html=True)
@@ -235,8 +259,7 @@ def get_last_update_info():
         return "indisponível"
 
 def get_auth_token(senha):
-    """Gera um token determinístico baseado na senha. Não é a senha em texto puro,
-    é um hash SHA-256 da senha concatenada com um sal fixo."""
+    """Gera um token determinístico baseado na senha."""
     return hashlib.sha256(f"{senha}|fluxo_caixa_v1".encode()).hexdigest()[:32]
 
 def password_entered():
@@ -603,50 +626,47 @@ elif menu == "Relatório":
         df_fluxo["Competencia"] = pd.to_datetime(df_fluxo["Data_Efetivacao"]).dt.strftime('%m/%Y')
 
         st.subheader("🔍 Filtros")
-        
-        st.markdown("""
-            <style>
-                .filtros-anchor-1, .filtros-anchor-2 { display: none; }
-                
-                div[data-testid="stElementContainer"]:has(> div > div > .filtros-anchor-1) + div[data-testid="stHorizontalBlock"],
-                div[data-testid="stElementContainer"]:has(> div > div > .filtros-anchor-2) + div[data-testid="stHorizontalBlock"] {
-                    flex-direction: row !important;
-                    flex-wrap: nowrap !important;
-                    gap: 10px !important;
-                }
-                div[data-testid="stElementContainer"]:has(> div > div > .filtros-anchor-1) + div[data-testid="stHorizontalBlock"] > div[data-testid="column"],
-                div[data-testid="stElementContainer"]:has(> div > div > .filtros-anchor-1) + div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"],
-                div[data-testid="stElementContainer"]:has(> div > div > .filtros-anchor-2) + div[data-testid="stHorizontalBlock"] > div[data-testid="column"],
-                div[data-testid="stElementContainer"]:has(> div > div > .filtros-anchor-2) + div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {
-                    flex: 1 1 50% !important;
-                    width: 50% !important;
-                    min-width: 0 !important;
-                    max-width: 50% !important;
-                }
-            </style>
-            <div class="filtros-anchor-1"></div>
-        """, unsafe_allow_html=True)
-        
+
+        # Competência atual para uso como valor padrão
+        competencia_atual = datetime.now().strftime('%m/%Y')
+
+        # ── Abre o wrapper que força layout 2 colunas em qualquer tela ──
+        st.markdown('<div class="filtros-grid-wrapper">', unsafe_allow_html=True)
+
+        # Linha 1 de filtros: Competência | Categoria
         f1, f2 = st.columns(2, gap="small")
+
         opcoes_comp = df_fluxo["Competencia"].dropna().unique().tolist()
         opcoes_comp = [c for c in opcoes_comp if str(c).strip() != ""]
         opcoes_comp.sort(key=lambda x: datetime.strptime(x, '%m/%Y'), reverse=True)
-        filtro_comp = f1.multiselect("Competência", opcoes_comp, placeholder="Selecione...")
-        
+
+        # Pré-seleciona o mês atual quando ele existir nos dados
+        default_comp = [competencia_atual] if competencia_atual in opcoes_comp else []
+
+        filtro_comp = f1.multiselect(
+            "Competência",
+            opcoes_comp,
+            default=default_comp,
+            placeholder="Selecione..."
+        )
+
         opcoes_cat = df_fluxo["Categoria"].dropna().unique().tolist() if "Categoria" in df_fluxo.columns else []
         opcoes_cat = [c for c in opcoes_cat if str(c).strip() != ""]
         filtro_cat = f2.multiselect("Categoria", opcoes_cat, placeholder="Selecione...")
-        
-        st.markdown('<div class="filtros-anchor-2"></div>', unsafe_allow_html=True)
-        
+
+        # Linha 2 de filtros: Origem | Cartão
         f3, f4 = st.columns(2, gap="small")
+
         opcoes_origem = df_fluxo["Origem"].dropna().unique().tolist() if "Origem" in df_fluxo.columns else []
         opcoes_origem = [c for c in opcoes_origem if str(c).strip() != ""]
         filtro_origem = f3.multiselect("Origem", opcoes_origem, placeholder="Selecione...")
-        
+
         opcoes_cartao = df_fluxo["Cartao"].dropna().unique().tolist() if "Cartao" in df_fluxo.columns else []
         opcoes_cartao = [c for c in opcoes_cartao if str(c).strip() != ""]
         filtro_cartao = f4.multiselect("Cartão", opcoes_cartao, placeholder="Selecione...")
+
+        # ── Fecha o wrapper ──
+        st.markdown('</div>', unsafe_allow_html=True)
 
         df_filtrado = df_fluxo.copy()
         
@@ -738,7 +758,6 @@ elif menu == "Cartões":
                 colA, colB = st.columns(2)
                 data_compra = colA.date_input("Data da Compra", datetime.now(), format="DD/MM/YYYY")
                 
-                # ADICIONADO: Removemos o index=None para o cartão voltar a selecionar o 1º automaticamente
                 cartao_sel = colB.selectbox("Cartão", cartoes)
                 
                 c1, c2 = st.columns(2)
@@ -749,7 +768,6 @@ elif menu == "Cartões":
                 valor_total = c3.number_input("Valor Total (R$)", min_value=0.01, step=50.0, value=None, format="%.2f")
                 parcelas = c4.number_input("Qtd. Parcelas", min_value=1, max_value=72, value=1, step=1)
                 
-                # A lógica agora funciona direto pois cartao_sel sempre tem um valor por padrão
                 cartao_info = df_cadastros[df_cadastros[colunas_reais["cartao"]] == cartao_sel]
                 col_melhor_dia = colunas_reais.get("melhor_dia_compra", "melhor_dia_compra")
                 col_vencimento = colunas_reais.get("vencimento_cartao", "vencimento_cartao")
