@@ -647,7 +647,20 @@ elif menu == "Relatório":
 
         opcoes_comp = df_fluxo["Competencia"].dropna().unique().tolist()
         opcoes_comp = [c for c in opcoes_comp if str(c).strip() != ""]
-        opcoes_comp.sort(key=lambda x: datetime.strptime(x, '%m/%Y'), reverse=True)
+
+        # Ordenação: mês atual primeiro, depois futuros (crescente), depois passados (decrescente)
+        _hoje_dt = datetime.strptime(competencia_atual, '%m/%Y')
+        _futuros = sorted(
+            [c for c in opcoes_comp if datetime.strptime(c, '%m/%Y') >= _hoje_dt],
+            key=lambda x: datetime.strptime(x, '%m/%Y')
+        )
+        _passados = sorted(
+            [c for c in opcoes_comp if datetime.strptime(c, '%m/%Y') < _hoje_dt],
+            key=lambda x: datetime.strptime(x, '%m/%Y'),
+            reverse=True
+        )
+        opcoes_comp = _futuros + _passados
+
         default_comp = [competencia_atual] if competencia_atual in opcoes_comp else []
 
         opcoes_cat = df_fluxo["Categoria"].dropna().unique().tolist() if "Categoria" in df_fluxo.columns else []
@@ -717,12 +730,17 @@ elif menu == "Relatório":
             "Valor": st.column_config.TextColumn("Valor (R$)") 
         }
 
+        # Gera um key dinâmico para forçar o data_editor a recriar quando os filtros mudarem
+        _filtro_key = hashlib.md5(
+            f"{filtro_comp}|{filtro_cat}|{filtro_origem}|{filtro_cartao}|{agrupar_faturas}".encode()
+        ).hexdigest()[:12]
+
         df_editado = st.data_editor(
             df_filtrado,
             column_config=col_config,
             use_container_width=False,
             num_rows="fixed",
-            key="editor_fluxo"
+            key=f"editor_fluxo_{_filtro_key}"
         )
 
         if st.button("Salvar Alterações", type="primary"):
