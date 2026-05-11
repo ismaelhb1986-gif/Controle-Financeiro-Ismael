@@ -617,7 +617,7 @@ elif menu == "Relatório":
         opcoes_cartao = df_fluxo["Cartao"].dropna().unique().tolist() if "Cartao" in df_fluxo.columns else []
         opcoes_cartao = [c for c in opcoes_cartao if str(c).strip() != ""]
 
-        with st.expander("🔍 Filtros", expanded=True):
+        with st.expander("🔍 Filtros", expanded=False):
             filtro_comp = st.multiselect(
                 "Competência",
                 opcoes_comp,
