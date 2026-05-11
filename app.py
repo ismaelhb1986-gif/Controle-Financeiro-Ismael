@@ -217,24 +217,7 @@ st.markdown("""
             .calendar-saldo-label { font-size: 9px; }
         }
 
-        /* --- 9. GRADE 2x2 DE FILTROS (RELATÓRIO) ---
-           Sobrepõe o media query interno do Streamlit que força flex-direction:column
-           em telas pequenas. Usamos :is() para elevar a especificidade acima do
-           seletor nativo do framework sem precisar de JS ou wrappers. --- */
-        @media (max-width: 640px) {
-            :is(section.main, .stApp) div[data-testid="stHorizontalBlock"].filtros-2col {
-                flex-direction: row !important;
-                flex-wrap: nowrap !important;
-                gap: 8px !important;
-            }
-            :is(section.main, .stApp) div[data-testid="stHorizontalBlock"].filtros-2col > div[data-testid="stColumn"] {
-                flex: 1 1 50% !important;
-                width: 50% !important;
-                min-width: 0 !important;
-                max-width: 50% !important;
-                overflow: hidden !important;
-            }
-        }
+        /* --- 9. Filtros em expander — sem CSS adicional necessário --- */
     </style>
 """, unsafe_allow_html=True)
 
@@ -617,83 +600,33 @@ elif menu == "Relatório":
 
         df_fluxo["Competencia"] = pd.to_datetime(df_fluxo["Data_Efetivacao"]).dt.strftime('%m/%Y')
 
-        st.subheader("🔍 Filtros")
-
         # Competência atual para uso como valor padrão
         competencia_atual = datetime.now().strftime('%m/%Y')
-
-        # Injeta classe CSS nos stHorizontalBlock dos filtros via JS mínimo.
-        # A classe filtros-2col é alvo do @media override no CSS global acima.
-        st.markdown("""
-            <script>
-            (function() {
-                function tagBlocks() {
-                    var anchor = document.getElementById('filtros-anchor');
-                    if (!anchor) return false;
-                    // Sobe até encontrar um container que tenha stHorizontalBlock como descendente
-                    var found = [];
-                    var node = anchor;
-                    while (node && found.length < 2) {
-                        // Busca stHorizontalBlock em irmãos subsequentes em cada nível
-                        var parent = node.parentElement;
-                        if (!parent) break;
-                        var siblings = parent.children;
-                        var passou = false;
-                        for (var i = 0; i < siblings.length; i++) {
-                            if (siblings[i] === node) { passou = true; continue; }
-                            if (!passou) continue;
-                            var blocks = siblings[i].querySelectorAll('[data-testid="stHorizontalBlock"]');
-                            blocks.forEach(function(b) {
-                                if (found.length < 2) found.push(b);
-                            });
-                            if (found.length >= 2) break;
-                        }
-                        node = parent;
-                    }
-                    found.forEach(function(b) { b.classList.add('filtros-2col'); });
-                    return found.length >= 2;
-                }
-                var t = 0;
-                var iv = setInterval(function() {
-                    if (tagBlocks() || ++t > 20) clearInterval(iv);
-                }, 200);
-            })();
-            </script>
-            <span id="filtros-anchor" style="display:none"></span>
-        """, unsafe_allow_html=True)
-
-        # Linha 1 de filtros: Competência | Categoria
-                # Linha 1 de filtros: Competência | Categoria
-        f1, f2 = st.columns(2, gap="small")
 
         opcoes_comp = df_fluxo["Competencia"].dropna().unique().tolist()
         opcoes_comp = [c for c in opcoes_comp if str(c).strip() != ""]
         opcoes_comp.sort(key=lambda x: datetime.strptime(x, '%m/%Y'), reverse=True)
-
-        # Pré-seleciona o mês atual quando ele existir nos dados
         default_comp = [competencia_atual] if competencia_atual in opcoes_comp else []
-
-        filtro_comp = f1.multiselect(
-            "Competência",
-            opcoes_comp,
-            default=default_comp,
-            placeholder="Selecione..."
-        )
 
         opcoes_cat = df_fluxo["Categoria"].dropna().unique().tolist() if "Categoria" in df_fluxo.columns else []
         opcoes_cat = [c for c in opcoes_cat if str(c).strip() != ""]
-        filtro_cat = f2.multiselect("Categoria", opcoes_cat, placeholder="Selecione...")
-
-        # Linha 2 de filtros: Origem | Cartão
-        f3, f4 = st.columns(2, gap="small")
 
         opcoes_origem = df_fluxo["Origem"].dropna().unique().tolist() if "Origem" in df_fluxo.columns else []
         opcoes_origem = [c for c in opcoes_origem if str(c).strip() != ""]
-        filtro_origem = f3.multiselect("Origem", opcoes_origem, placeholder="Selecione...")
 
         opcoes_cartao = df_fluxo["Cartao"].dropna().unique().tolist() if "Cartao" in df_fluxo.columns else []
         opcoes_cartao = [c for c in opcoes_cartao if str(c).strip() != ""]
-        filtro_cartao = f4.multiselect("Cartão", opcoes_cartao, placeholder="Selecione...")
+
+        with st.expander("🔍 Filtros", expanded=True):
+            filtro_comp = st.multiselect(
+                "Competência",
+                opcoes_comp,
+                default=default_comp,
+                placeholder="Selecione..."
+            )
+            filtro_cat = st.multiselect("Categoria", opcoes_cat, placeholder="Selecione...")
+            filtro_origem = st.multiselect("Origem", opcoes_origem, placeholder="Selecione...")
+            filtro_cartao = st.multiselect("Cartão", opcoes_cartao, placeholder="Selecione...")
 
         df_filtrado = df_fluxo.copy()
         
