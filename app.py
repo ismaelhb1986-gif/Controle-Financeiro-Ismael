@@ -217,7 +217,49 @@ st.markdown("""
             .calendar-saldo-label { font-size: 9px; }
         }
 
-        /* --- 9. Filtros em expander — sem CSS adicional necessário --- */
+        /* --- 9. Estilo para a tabela de faturas agrupadas --- */
+        .fatura-card {
+            background-color: #ffffff;
+            border-radius: 12px;
+            border: 1px solid #e2e8f0;
+            padding: 16px 20px;
+            margin-bottom: 10px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+        }
+        .fatura-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 6px;
+        }
+        .fatura-cartao-nome {
+            font-family: 'Poppins', sans-serif;
+            font-weight: 600;
+            font-size: 14px;
+            color: #334155;
+        }
+        .fatura-valor {
+            font-family: 'Poppins', sans-serif;
+            font-weight: 700;
+            font-size: 16px;
+            color: #9f1239;
+        }
+        .fatura-meta {
+            font-size: 12px;
+            color: #64748b;
+        }
+        .fatura-badge {
+            display: inline-block;
+            background-color: #fef3c7;
+            color: #92400e;
+            border-radius: 6px;
+            padding: 2px 8px;
+            font-size: 11px;
+            font-weight: 600;
+            margin-left: 8px;
+        }
+
+        /* --- 10. Filtros em expander — sem CSS adicional necessário --- */
     </style>
 """, unsafe_allow_html=True)
 
@@ -628,6 +670,18 @@ elif menu == "Relatório":
             filtro_origem = st.multiselect("Origem", opcoes_origem, placeholder="Selecione...")
             filtro_cartao = st.multiselect("Cartão", opcoes_cartao, placeholder="Selecione...")
 
+            # --- NOVA FLAG: Agrupar faturas de cartão ---
+            st.markdown("<hr style='margin: 12px 0; border-color: #f1f5f9;'>", unsafe_allow_html=True)
+            agrupar_faturas = st.checkbox(
+                "💳 Agrupar faturas de cartão por vencimento",
+                value=False,
+                help=(
+                    "Quando marcado, os lançamentos de Cartão de Crédito são removidos da tabela principal "
+                    "e exibidos em uma tabela separada abaixo, agrupados por cartão e data de vencimento "
+                    "(uma linha por fatura, somente leitura)."
+                )
+            )
+
         df_filtrado = df_fluxo.copy()
         
         if filtro_comp:
@@ -638,6 +692,14 @@ elif menu == "Relatório":
             df_filtrado = df_filtrado[df_filtrado["Origem"].isin(filtro_origem)]
         if filtro_cartao:
             df_filtrado = df_filtrado[df_filtrado["Cartao"].isin(filtro_cartao)]
+
+        # --- Separar linhas de cartão se a flag estiver ativa ---
+        if agrupar_faturas and "Origem" in df_filtrado.columns:
+            mask_cartao = df_filtrado["Origem"] == "Cartão de Crédito"
+            df_cartao_linhas = df_filtrado[mask_cartao].copy()
+            df_filtrado = df_filtrado[~mask_cartao].copy()
+        else:
+            df_cartao_linhas = pd.DataFrame()
 
         df_filtrado = df_filtrado.drop(columns=["Competencia"])
         df_filtrado = df_filtrado.sort_values(by="Data_Efetivacao", ascending=False).reset_index(drop=True)
@@ -689,6 +751,98 @@ elif menu == "Relatório":
             
             st.success("Extrato atualizado com sucesso!")
             st.rerun()
+
+        # --- TABELA DE FATURAS AGRUPADAS (exibida somente quando flag está ativa) ---
+        if agrupar_faturas and not df_cartao_linhas.empty:
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.subheader("💳 Faturas de Cartão (Agrupadas)")
+            st.caption("Lançamentos de cartão de crédito agrupados por cartão e vencimento. Somente leitura — para editar, desmarque a opção de agrupamento.")
+
+            # Agrupamento: cartão + data de vencimento (Data_Efetivacao) + competência
+            df_cartao_linhas["Valor_Num"] = pd.to_numeric(df_cartao_linhas["Valor"], errors="coerce").fillna(0)
+            df_cartao_linhas["Competencia_Fatura"] = pd.to_datetime(df_cartao_linhas["Data_Efetivacao"]).dt.strftime('%m/%Y')
+
+            df_faturas = (
+                df_cartao_linhas
+                .groupby(["Cartao", "Data_Efetivacao", "Competencia_Fatura"], as_index=False)
+                .agg(
+                    Qtd_Parcelas=("ID", "count"),
+                    Total_Fatura=("Valor_Num", "sum"),
+                )
+            )
+            df_faturas = df_faturas.sort_values(["Cartao", "Data_Efetivacao"]).reset_index(drop=True)
+
+            # Renderizar como cards HTML para visual mais limpo
+            nomes_meses_pt = [
+                "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+                "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"
+            ]
+
+            html_faturas = []
+            for _, row in df_faturas.iterrows():
+                cartao_nome = str(row["Cartao"]) if pd.notna(row["Cartao"]) else "—"
+                data_venc = pd.to_datetime(row["Data_Efetivacao"])
+                data_venc_str = data_venc.strftime("%d/%m/%Y")
+                competencia = str(row["Competencia_Fatura"])
+                qtd = int(row["Qtd_Parcelas"])
+                total = float(row["Total_Fatura"])
+                total_str = f"R$ {formatar_br(abs(total))}"
+                cor_total = "#9f1239" if total < 0 else "#0f766e"
+
+                # Detectar se é previsão (alguma parcela com status Previsão)
+                mask_prev = (
+                    (df_cartao_linhas["Cartao"] == row["Cartao"]) &
+                    (df_cartao_linhas["Data_Efetivacao"] == row["Data_Efetivacao"])
+                )
+                tem_previsao = False
+                if "Status" in df_cartao_linhas.columns:
+                    tem_previsao = df_cartao_linhas.loc[mask_prev, "Status"].str.contains("Previsão", na=False).any()
+
+                badge_html = '<span class="fatura-badge">Previsão</span>' if tem_previsao else '<span class="fatura-badge" style="background-color:#dcfce7;color:#166534;">Efetivado</span>'
+
+                html_faturas.append(f"""
+                <div class="fatura-card">
+                    <div class="fatura-card-header">
+                        <span class="fatura-cartao-nome">💳 {cartao_nome} {badge_html}</span>
+                        <span class="fatura-valor" style="color:{cor_total};">{total_str}</span>
+                    </div>
+                    <div class="fatura-meta">
+                        📅 Vencimento: <strong>{data_venc_str}</strong>
+                        &nbsp;&nbsp;|&nbsp;&nbsp;
+                        🗓️ Competência: <strong>{competencia}</strong>
+                        &nbsp;&nbsp;|&nbsp;&nbsp;
+                        📦 {qtd} lançamento{"s" if qtd != 1 else ""}
+                    </div>
+                </div>
+                """)
+
+            st.markdown("".join(html_faturas), unsafe_allow_html=True)
+
+            # Também exibe um dataframe resumido para facilitar cópia/exportação
+            with st.expander("📊 Ver como tabela", expanded=False):
+                df_faturas_exib = df_faturas.copy()
+                df_faturas_exib["Total_Fatura"] = df_faturas_exib["Total_Fatura"].apply(
+                    lambda v: formatar_br(abs(v))
+                )
+                df_faturas_exib = df_faturas_exib.rename(columns={
+                    "Cartao": "Cartão",
+                    "Data_Efetivacao": "Vencimento",
+                    "Competencia_Fatura": "Competência",
+                    "Qtd_Parcelas": "Lançamentos",
+                    "Total_Fatura": "Total (R$)",
+                })
+                df_faturas_exib.index = range(1, len(df_faturas_exib) + 1)
+                st.dataframe(
+                    df_faturas_exib,
+                    use_container_width=True,
+                    column_config={
+                        "Vencimento": st.column_config.DateColumn("Vencimento", format="DD/MM/YYYY"),
+                    }
+                )
+
+        elif agrupar_faturas and df_cartao_linhas.empty:
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.info("💳 Nenhum lançamento de Cartão de Crédito encontrado nos filtros aplicados.")
 
 # --- TELA 4: CARTÕES DE CRÉDITO ---
 elif menu == "Cartões":
