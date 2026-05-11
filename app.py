@@ -218,9 +218,23 @@ st.markdown("""
         }
 
         /* --- 9. GRADE 2x2 DE FILTROS (RELATÓRIO) ---
-           Estilo aplicado via JavaScript inline (ver bloco abaixo na tela Relatório)
-           porque o Streamlit aninha stHorizontalBlock em múltiplas camadas de
-           stElementContainer que bloqueiam seletores CSS estáticos. --- */
+           Sobrepõe o media query interno do Streamlit que força flex-direction:column
+           em telas pequenas. Usamos :is() para elevar a especificidade acima do
+           seletor nativo do framework sem precisar de JS ou wrappers. --- */
+        @media (max-width: 640px) {
+            :is(section.main, .stApp) div[data-testid="stHorizontalBlock"].filtros-2col {
+                flex-direction: row !important;
+                flex-wrap: nowrap !important;
+                gap: 8px !important;
+            }
+            :is(section.main, .stApp) div[data-testid="stHorizontalBlock"].filtros-2col > div[data-testid="stColumn"] {
+                flex: 1 1 50% !important;
+                width: 50% !important;
+                min-width: 0 !important;
+                max-width: 50% !important;
+                overflow: hidden !important;
+            }
+        }
     </style>
 """, unsafe_allow_html=True)
 
@@ -608,73 +622,48 @@ elif menu == "Relatório":
         # Competência atual para uso como valor padrão
         competencia_atual = datetime.now().strftime('%m/%Y')
 
-        # Injeta script JS que força layout 2 colunas nos dois stHorizontalBlock
-        # dos filtros. CSS puro não alcança esses elementos no Streamlit mobile
-        # porque ficam encapsulados em múltiplas camadas de stElementContainer.
+        # Injeta classe CSS nos stHorizontalBlock dos filtros via JS mínimo.
+        # A classe filtros-2col é alvo do @media override no CSS global acima.
         st.markdown("""
             <script>
-            (function forceFiltros2Col() {
-                function aplicar() {
-                    // Busca todos os blocos de colunas horizontais da página
-                    var blocos = document.querySelectorAll('[data-testid="stHorizontalBlock"]');
-                    // Os dois primeiros blocos após o subheader "Filtros" são os nossos
-                    // Identifica pelo marcador de texto do subheader mais próximo acima
-                    var aplicados = 0;
-                    for (var i = 0; i < blocos.length && aplicados < 2; i++) {
-                        var bloco = blocos[i];
-                        // Verifica se algum ancestral contém o marcador de filtros
-                        var ancestor = bloco;
-                        var ehFiltro = false;
-                        // Sobe na árvore até 10 níveis procurando o contexto da seção Filtros
-                        for (var j = 0; j < 10; j++) {
-                            if (!ancestor.previousElementSibling) {
-                                ancestor = ancestor.parentElement;
-                                if (!ancestor) break;
-                                continue;
-                            }
-                            // Verifica irmãos anteriores em busca do marcador id
-                            var prev = ancestor.previousElementSibling;
-                            while (prev) {
-                                if (prev.querySelector && prev.querySelector('#filtros-js-anchor')) {
-                                    ehFiltro = true;
-                                    break;
-                                }
-                                prev = prev.previousElementSibling;
-                            }
-                            if (ehFiltro) break;
-                            ancestor = ancestor.parentElement;
-                            if (!ancestor) break;
-                        }
-                        if (ehFiltro) {
-                            bloco.style.setProperty('flex-direction', 'row', 'important');
-                            bloco.style.setProperty('flex-wrap', 'nowrap', 'important');
-                            bloco.style.setProperty('gap', '8px', 'important');
-                            // Força as colunas filhas a 50%
-                            var cols = bloco.querySelectorAll('[data-testid="stColumn"]');
-                            cols.forEach(function(col) {
-                                col.style.setProperty('flex', '1 1 50%', 'important');
-                                col.style.setProperty('width', '50%', 'important');
-                                col.style.setProperty('min-width', '0', 'important');
-                                col.style.setProperty('max-width', '50%', 'important');
+            (function() {
+                function tagBlocks() {
+                    var anchor = document.getElementById('filtros-anchor');
+                    if (!anchor) return false;
+                    // Sobe até encontrar um container que tenha stHorizontalBlock como descendente
+                    var found = [];
+                    var node = anchor;
+                    while (node && found.length < 2) {
+                        // Busca stHorizontalBlock em irmãos subsequentes em cada nível
+                        var parent = node.parentElement;
+                        if (!parent) break;
+                        var siblings = parent.children;
+                        var passou = false;
+                        for (var i = 0; i < siblings.length; i++) {
+                            if (siblings[i] === node) { passou = true; continue; }
+                            if (!passou) continue;
+                            var blocks = siblings[i].querySelectorAll('[data-testid="stHorizontalBlock"]');
+                            blocks.forEach(function(b) {
+                                if (found.length < 2) found.push(b);
                             });
-                            aplicados++;
+                            if (found.length >= 2) break;
                         }
+                        node = parent;
                     }
-                    return aplicados;
+                    found.forEach(function(b) { b.classList.add('filtros-2col'); });
+                    return found.length >= 2;
                 }
-                // Tenta imediatamente e repete até encontrar os elementos
-                var tentativas = 0;
-                var intervalo = setInterval(function() {
-                    tentativas++;
-                    var ok = aplicar();
-                    if (ok >= 2 || tentativas > 30) clearInterval(intervalo);
-                }, 150);
+                var t = 0;
+                var iv = setInterval(function() {
+                    if (tagBlocks() || ++t > 20) clearInterval(iv);
+                }, 200);
             })();
             </script>
-            <span id="filtros-js-anchor" style="display:none"></span>
+            <span id="filtros-anchor" style="display:none"></span>
         """, unsafe_allow_html=True)
 
         # Linha 1 de filtros: Competência | Categoria
+                # Linha 1 de filtros: Competência | Categoria
         f1, f2 = st.columns(2, gap="small")
 
         opcoes_comp = df_fluxo["Competencia"].dropna().unique().tolist()
