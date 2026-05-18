@@ -770,8 +770,8 @@ elif menu == "Relatório":
         saldo_periodo = total_entradas + total_saidas
         cor_saldo_class = "totais-saldo-pos" if saldo_periodo >= 0 else "totais-saldo-neg"
         sinal_saldo = "+" if saldo_periodo > 0 else ""
-
-        st.markdown(f"""
+        # (HTML montado aqui, renderizado após a tabela)
+        totais_html = f"""
         <div class="totais-bar">
             <div class="totais-item">
                 <span class="totais-label">⬆️ Entradas</span>
@@ -790,7 +790,7 @@ elif menu == "Relatório":
                 <span class="totais-valor" style="color:#475569;">{len(df_filtrado)}</span>
             </div>
         </div>
-        """, unsafe_allow_html=True)
+        """
 
         df_filtrado["Valor"] = df_filtrado["Valor"].apply(formatar_br)
 
@@ -842,6 +842,9 @@ elif menu == "Relatório":
             
             st.success("Extrato atualizado com sucesso!")
             st.rerun()
+
+        # --- TOTALIZADOR: exibido abaixo da tabela e do botão salvar ---
+        st.markdown(totais_html, unsafe_allow_html=True)
 
         # --- TABELA DE FATURAS AGRUPADAS (exibida somente quando flag está ativa) ---
         if agrupar_faturas and not df_cartao_linhas.empty:
@@ -906,50 +909,46 @@ elif menu == "Relatório":
 
             st.markdown("".join(html_faturas), unsafe_allow_html=True)
 
-            # --- TABELA DETALHADA: todos os lançamentos de cartão filtrados ---
-            st.markdown("<br>", unsafe_allow_html=True)
-            st.markdown("**🧾 Detalhamento dos lançamentos**")
+            # --- TABELA DETALHADA dentro de expander fechado ---
+            with st.expander("🧾 Ver detalhamento dos lançamentos", expanded=False):
+                df_cartao_detalhe = df_cartao_linhas.copy()
+                df_cartao_detalhe = df_cartao_detalhe.sort_values(
+                    ["Cartao", "Data_Efetivacao", "Data_Ocorrencia"]
+                ).reset_index(drop=True)
+                df_cartao_detalhe.index = range(1, len(df_cartao_detalhe) + 1)
 
-            df_cartao_detalhe = df_cartao_linhas.copy()
-            df_cartao_detalhe = df_cartao_detalhe.sort_values(
-                ["Cartao", "Data_Efetivacao", "Data_Ocorrencia"]
-            ).reset_index(drop=True)
-            df_cartao_detalhe.index = range(1, len(df_cartao_detalhe) + 1)
+                df_cartao_detalhe["Valor_Num"] = df_cartao_detalhe["Valor_Num"].apply(
+                    lambda v: formatar_br(abs(v))
+                )
 
-            # Formatar valor para exibição
-            df_cartao_detalhe["Valor_Num"] = df_cartao_detalhe["Valor_Num"].apply(
-                lambda v: formatar_br(abs(v))
-            )
+                colunas_detalhe = []
+                renomear = {}
+                for col, nome in [
+                    ("Data_Ocorrencia", "Data Compra"),
+                    ("Data_Efetivacao", "Vencimento"),
+                    ("Cartao", "Cartão"),
+                    ("Categoria", "Categoria"),
+                    ("Descricao", "Descrição"),
+                    ("Valor_Num", "Valor (R$)"),
+                    ("Status", "Status"),
+                ]:
+                    if col in df_cartao_detalhe.columns:
+                        colunas_detalhe.append(col)
+                        renomear[col] = nome
 
-            # Selecionar e renomear colunas relevantes para exibição
-            colunas_detalhe = []
-            renomear = {}
-            for col, nome in [
-                ("Data_Ocorrencia", "Data Compra"),
-                ("Data_Efetivacao", "Vencimento"),
-                ("Cartao", "Cartão"),
-                ("Categoria", "Categoria"),
-                ("Descricao", "Descrição"),
-                ("Valor_Num", "Valor (R$)"),
-                ("Status", "Status"),
-            ]:
-                if col in df_cartao_detalhe.columns:
-                    colunas_detalhe.append(col)
-                    renomear[col] = nome
+                df_cartao_exib = df_cartao_detalhe[colunas_detalhe].rename(columns=renomear)
 
-            df_cartao_exib = df_cartao_detalhe[colunas_detalhe].rename(columns=renomear)
+                col_config_det = {}
+                if "Data Compra" in df_cartao_exib.columns:
+                    col_config_det["Data Compra"] = st.column_config.DateColumn("Data Compra", format="DD/MM/YYYY")
+                if "Vencimento" in df_cartao_exib.columns:
+                    col_config_det["Vencimento"] = st.column_config.DateColumn("Vencimento", format="DD/MM/YYYY")
 
-            col_config_det = {}
-            if "Data Compra" in df_cartao_exib.columns:
-                col_config_det["Data Compra"] = st.column_config.DateColumn("Data Compra", format="DD/MM/YYYY")
-            if "Vencimento" in df_cartao_exib.columns:
-                col_config_det["Vencimento"] = st.column_config.DateColumn("Vencimento", format="DD/MM/YYYY")
-
-            st.dataframe(
-                df_cartao_exib,
-                use_container_width=True,
-                column_config=col_config_det,
-            )
+                st.dataframe(
+                    df_cartao_exib,
+                    use_container_width=True,
+                    column_config=col_config_det,
+                )
 
         elif agrupar_faturas and df_cartao_linhas.empty:
             st.markdown("<br>", unsafe_allow_html=True)
