@@ -259,7 +259,55 @@ st.markdown("""
             margin-left: 8px;
         }
 
-        /* --- 10. Filtros em expander — sem CSS adicional necessário --- */
+        /* --- 10. Totalizador do Relatório --- */
+        .totais-bar {
+            background-color: #ffffff;
+            border-radius: 12px;
+            border: 1px solid #e2e8f0;
+            padding: 14px 20px;
+            margin-bottom: 18px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+            display: flex;
+            gap: 0;
+            flex-wrap: wrap;
+        }
+        .totais-item {
+            flex: 1 1 120px;
+            text-align: center;
+            padding: 6px 12px;
+            border-right: 1px solid #f1f5f9;
+        }
+        .totais-item:last-child {
+            border-right: none;
+        }
+        .totais-label {
+            font-size: 11px;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-family: 'Poppins', sans-serif;
+            font-weight: 500;
+            display: block;
+            margin-bottom: 4px;
+        }
+        .totais-valor {
+            font-size: 16px;
+            font-weight: 700;
+            font-family: 'Poppins', sans-serif;
+        }
+        .totais-entradas { color: #2563eb; }
+        .totais-saidas   { color: #e11d48; }
+        .totais-saldo-pos { color: #0f766e; }
+        .totais-saldo-neg { color: #9f1239; }
+
+        @media (max-width: 768px) {
+            .totais-bar { padding: 10px 12px; gap: 0; }
+            .totais-item { padding: 4px 8px; }
+            .totais-valor { font-size: 14px; }
+            .totais-label { font-size: 10px; }
+        }
+
+        /* --- 11. Filtros em expander — sem CSS adicional necessário --- */
     </style>
 """, unsafe_allow_html=True)
 
@@ -527,7 +575,7 @@ if menu == "Calendário":
                     borda = "#fecdd3" if valor_saldo < 0 else "#ccfbf1"
                     
                     if movimento_dia > 0:
-                        cor_mov = "#2563eb"  # ← ALTERADO: azul para entradas
+                        cor_mov = "#2563eb"
                         sinal_mov = "+"
                     elif movimento_dia < 0:
                         cor_mov = "#e11d48"
@@ -642,13 +690,11 @@ elif menu == "Relatório":
 
         df_fluxo["Competencia"] = pd.to_datetime(df_fluxo["Data_Efetivacao"]).dt.strftime('%m/%Y')
 
-        # Competência atual para uso como valor padrão
         competencia_atual = datetime.now().strftime('%m/%Y')
 
         opcoes_comp = df_fluxo["Competencia"].dropna().unique().tolist()
         opcoes_comp = [c for c in opcoes_comp if str(c).strip() != ""]
 
-        # Ordenação: mês atual primeiro, depois futuros (crescente), depois passados (decrescente)
         _hoje_dt = datetime.strptime(competencia_atual, '%m/%Y')
         _futuros = sorted(
             [c for c in opcoes_comp if datetime.strptime(c, '%m/%Y') >= _hoje_dt],
@@ -683,7 +729,6 @@ elif menu == "Relatório":
             filtro_origem = st.multiselect("Origem", opcoes_origem, placeholder="Selecione...")
             filtro_cartao = st.multiselect("Cartão", opcoes_cartao, placeholder="Selecione...")
 
-            # --- NOVA FLAG: Agrupar faturas de cartão ---
             st.markdown("<hr style='margin: 12px 0; border-color: #f1f5f9;'>", unsafe_allow_html=True)
             agrupar_faturas = st.checkbox(
                 "💳 Agrupar faturas de cartão por vencimento",
@@ -717,7 +762,36 @@ elif menu == "Relatório":
         df_filtrado = df_filtrado.drop(columns=["Competencia"])
         df_filtrado = df_filtrado.sort_values(by="Data_Efetivacao", ascending=False).reset_index(drop=True)
         df_filtrado.index = range(1, len(df_filtrado) + 1)
-        
+
+        # --- TOTALIZADOR: calcular antes de formatar os valores ---
+        valores_num = df_filtrado["Valor"].apply(parse_br_to_float)
+        total_entradas = valores_num[valores_num > 0].sum()
+        total_saidas = valores_num[valores_num < 0].sum()
+        saldo_periodo = total_entradas + total_saidas
+        cor_saldo_class = "totais-saldo-pos" if saldo_periodo >= 0 else "totais-saldo-neg"
+        sinal_saldo = "+" if saldo_periodo > 0 else ""
+
+        st.markdown(f"""
+        <div class="totais-bar">
+            <div class="totais-item">
+                <span class="totais-label">⬆️ Entradas</span>
+                <span class="totais-valor totais-entradas">R$ {formatar_br(total_entradas)}</span>
+            </div>
+            <div class="totais-item">
+                <span class="totais-label">⬇️ Saídas</span>
+                <span class="totais-valor totais-saidas">R$ {formatar_br(abs(total_saidas))}</span>
+            </div>
+            <div class="totais-item">
+                <span class="totais-label">💰 Saldo do Período</span>
+                <span class="totais-valor {cor_saldo_class}">{sinal_saldo}R$ {formatar_br(saldo_periodo)}</span>
+            </div>
+            <div class="totais-item">
+                <span class="totais-label">📄 Registros</span>
+                <span class="totais-valor" style="color:#475569;">{len(df_filtrado)}</span>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
         df_filtrado["Valor"] = df_filtrado["Valor"].apply(formatar_br)
 
         st.subheader("📋 Resultados")
@@ -730,7 +804,6 @@ elif menu == "Relatório":
             "Valor": st.column_config.TextColumn("Valor (R$)") 
         }
 
-        # Gera um key dinâmico para forçar o data_editor a recriar quando os filtros mudarem
         _filtro_key = hashlib.md5(
             f"{filtro_comp}|{filtro_cat}|{filtro_origem}|{filtro_cartao}|{agrupar_faturas}".encode()
         ).hexdigest()[:12]
@@ -776,7 +849,6 @@ elif menu == "Relatório":
             st.subheader("💳 Faturas de Cartão (Agrupadas)")
             st.caption("Lançamentos de cartão de crédito agrupados por cartão e vencimento. Somente leitura — para editar, desmarque a opção de agrupamento.")
 
-            # Agrupamento: cartão + data de vencimento (Data_Efetivacao) + competência
             df_cartao_linhas["Valor_Num"] = pd.to_numeric(df_cartao_linhas["Valor"], errors="coerce").fillna(0)
             df_cartao_linhas["Competencia_Fatura"] = pd.to_datetime(df_cartao_linhas["Data_Efetivacao"]).dt.strftime('%m/%Y')
 
@@ -790,7 +862,6 @@ elif menu == "Relatório":
             )
             df_faturas = df_faturas.sort_values(["Cartao", "Data_Efetivacao"]).reset_index(drop=True)
 
-            # Renderizar como cards HTML para visual mais limpo
             nomes_meses_pt = [
                 "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
                 "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"
@@ -807,7 +878,6 @@ elif menu == "Relatório":
                 total_str = f"R$ {formatar_br(abs(total))}"
                 cor_total = "#9f1239" if total < 0 else "#0f766e"
 
-                # Detectar se é previsão (alguma parcela com status Previsão)
                 mask_prev = (
                     (df_cartao_linhas["Cartao"] == row["Cartao"]) &
                     (df_cartao_linhas["Data_Efetivacao"] == row["Data_Efetivacao"])
@@ -836,27 +906,50 @@ elif menu == "Relatório":
 
             st.markdown("".join(html_faturas), unsafe_allow_html=True)
 
-            # Também exibe um dataframe resumido para facilitar cópia/exportação
-            with st.expander("📊 Ver como tabela", expanded=False):
-                df_faturas_exib = df_faturas.copy()
-                df_faturas_exib["Total_Fatura"] = df_faturas_exib["Total_Fatura"].apply(
-                    lambda v: formatar_br(abs(v))
-                )
-                df_faturas_exib = df_faturas_exib.rename(columns={
-                    "Cartao": "Cartão",
-                    "Data_Efetivacao": "Vencimento",
-                    "Competencia_Fatura": "Competência",
-                    "Qtd_Parcelas": "Lançamentos",
-                    "Total_Fatura": "Total (R$)",
-                })
-                df_faturas_exib.index = range(1, len(df_faturas_exib) + 1)
-                st.dataframe(
-                    df_faturas_exib,
-                    use_container_width=True,
-                    column_config={
-                        "Vencimento": st.column_config.DateColumn("Vencimento", format="DD/MM/YYYY"),
-                    }
-                )
+            # --- TABELA DETALHADA: todos os lançamentos de cartão filtrados ---
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.markdown("**🧾 Detalhamento dos lançamentos**")
+
+            df_cartao_detalhe = df_cartao_linhas.copy()
+            df_cartao_detalhe = df_cartao_detalhe.sort_values(
+                ["Cartao", "Data_Efetivacao", "Data_Ocorrencia"]
+            ).reset_index(drop=True)
+            df_cartao_detalhe.index = range(1, len(df_cartao_detalhe) + 1)
+
+            # Formatar valor para exibição
+            df_cartao_detalhe["Valor_Num"] = df_cartao_detalhe["Valor_Num"].apply(
+                lambda v: formatar_br(abs(v))
+            )
+
+            # Selecionar e renomear colunas relevantes para exibição
+            colunas_detalhe = []
+            renomear = {}
+            for col, nome in [
+                ("Data_Ocorrencia", "Data Compra"),
+                ("Data_Efetivacao", "Vencimento"),
+                ("Cartao", "Cartão"),
+                ("Categoria", "Categoria"),
+                ("Descricao", "Descrição"),
+                ("Valor_Num", "Valor (R$)"),
+                ("Status", "Status"),
+            ]:
+                if col in df_cartao_detalhe.columns:
+                    colunas_detalhe.append(col)
+                    renomear[col] = nome
+
+            df_cartao_exib = df_cartao_detalhe[colunas_detalhe].rename(columns=renomear)
+
+            col_config_det = {}
+            if "Data Compra" in df_cartao_exib.columns:
+                col_config_det["Data Compra"] = st.column_config.DateColumn("Data Compra", format="DD/MM/YYYY")
+            if "Vencimento" in df_cartao_exib.columns:
+                col_config_det["Vencimento"] = st.column_config.DateColumn("Vencimento", format="DD/MM/YYYY")
+
+            st.dataframe(
+                df_cartao_exib,
+                use_container_width=True,
+                column_config=col_config_det,
+            )
 
         elif agrupar_faturas and df_cartao_linhas.empty:
             st.markdown("<br>", unsafe_allow_html=True)
