@@ -759,14 +759,19 @@ elif menu == "Relatório":
         else:
             df_cartao_linhas = pd.DataFrame()
 
-        df_filtrado = df_filtrado.drop(columns=["Competencia"])
-        df_filtrado = df_filtrado.sort_values(by="Data_Efetivacao", ascending=False).reset_index(drop=True)
-        df_filtrado.index = range(1, len(df_filtrado) + 1)
+        df_filtrado = df_filtrado.drop(columns=["Competencia"], errors="ignore")
+        if not df_filtrado.empty:
+            df_filtrado = df_filtrado.sort_values(by="Data_Efetivacao", ascending=False).reset_index(drop=True)
+            df_filtrado.index = range(1, len(df_filtrado) + 1)
 
         # --- TOTALIZADOR: calcular antes de formatar os valores ---
-        valores_num = df_filtrado["Valor"].apply(parse_br_to_float)
-        total_entradas = valores_num[valores_num > 0].sum()
-        total_saidas = valores_num[valores_num < 0].sum()
+        if not df_filtrado.empty and "Valor" in df_filtrado.columns:
+            valores_num = pd.to_numeric(df_filtrado["Valor"], errors="coerce").fillna(0)
+            total_entradas = valores_num[valores_num > 0].sum()
+            total_saidas = valores_num[valores_num < 0].sum()
+        else:
+            total_entradas = 0.0
+            total_saidas = 0.0
         saldo_periodo = total_entradas + total_saidas
         cor_saldo_class = "totais-saldo-pos" if saldo_periodo >= 0 else "totais-saldo-neg"
         sinal_saldo = "+" if saldo_periodo > 0 else ""
@@ -792,56 +797,59 @@ elif menu == "Relatório":
         </div>
         """
 
-        df_filtrado["Valor"] = df_filtrado["Valor"].apply(formatar_br)
-
         st.subheader("📋 Resultados")
-        
-        col_config = {
-            "ID": None,
-            "Excluir": st.column_config.CheckboxColumn("Excluir", default=False),
-            "Data_Ocorrencia": st.column_config.DateColumn("Data Ocorrência", format="DD/MM/YYYY"),
-            "Data_Efetivacao": st.column_config.DateColumn("Data Efetivação", format="DD/MM/YYYY"),
-            "Valor": st.column_config.TextColumn("Valor (R$)") 
-        }
 
-        _filtro_key = hashlib.md5(
-            f"{filtro_comp}|{filtro_cat}|{filtro_origem}|{filtro_cartao}|{agrupar_faturas}".encode()
-        ).hexdigest()[:12]
+        if df_filtrado.empty:
+            st.info("Nenhum lançamento encontrado para os filtros aplicados.")
+        else:
+            df_filtrado["Valor"] = df_filtrado["Valor"].apply(formatar_br)
 
-        df_editado = st.data_editor(
-            df_filtrado,
-            column_config=col_config,
-            use_container_width=False,
-            num_rows="fixed",
-            key=f"editor_fluxo_{_filtro_key}"
-        )
+            col_config = {
+                "ID": None,
+                "Excluir": st.column_config.CheckboxColumn("Excluir", default=False),
+                "Data_Ocorrencia": st.column_config.DateColumn("Data Ocorrência", format="DD/MM/YYYY"),
+                "Data_Efetivacao": st.column_config.DateColumn("Data Efetivação", format="DD/MM/YYYY"),
+                "Valor": st.column_config.TextColumn("Valor (R$)")
+            }
 
-        if st.button("Salvar Alterações", type="primary"):
-            df_editado["Valor"] = df_editado["Valor"].apply(parse_br_to_float)
-            
-            df_editado["Excluir"] = df_editado["Excluir"].fillna(False)
-            
-            ids_excluir = df_editado[df_editado["Excluir"] == True]["ID"].tolist()
-            df_atualizar = df_editado[df_editado["Excluir"] == False].drop(columns=["Excluir"])
-            
-            df_atualizar["Data_Ocorrencia"] = pd.to_datetime(df_atualizar["Data_Ocorrencia"]).dt.strftime('%Y-%m-%d')
-            df_atualizar["Data_Efetivacao"] = pd.to_datetime(df_atualizar["Data_Efetivacao"]).dt.strftime('%Y-%m-%d')
-            
-            df_fluxo_final = df_fluxo.copy().drop(columns=["Excluir", "Competencia"], errors='ignore')
-            df_fluxo_final["Data_Ocorrencia"] = pd.to_datetime(df_fluxo_final["Data_Ocorrencia"]).dt.strftime('%Y-%m-%d')
-            df_fluxo_final["Data_Efetivacao"] = pd.to_datetime(df_fluxo_final["Data_Efetivacao"]).dt.strftime('%Y-%m-%d')
-            
-            df_fluxo_final = df_fluxo_final[~df_fluxo_final["ID"].isin(ids_excluir)]
-            
-            df_fluxo_final = df_fluxo_final.set_index("ID")
-            df_atualizar = df_atualizar.set_index("ID")
-            df_fluxo_final.update(df_atualizar)
-            
-            df_fluxo_final = df_fluxo_final.reset_index()
-            save_data("Fluxo_Caixa", df_fluxo_final)
-            
-            st.success("Extrato atualizado com sucesso!")
-            st.rerun()
+            _filtro_key = hashlib.md5(
+                f"{filtro_comp}|{filtro_cat}|{filtro_origem}|{filtro_cartao}|{agrupar_faturas}".encode()
+            ).hexdigest()[:12]
+
+            df_editado = st.data_editor(
+                df_filtrado,
+                column_config=col_config,
+                use_container_width=False,
+                num_rows="fixed",
+                key=f"editor_fluxo_{_filtro_key}"
+            )
+
+            if st.button("Salvar Alterações", type="primary"):
+                df_editado["Valor"] = df_editado["Valor"].apply(parse_br_to_float)
+
+                df_editado["Excluir"] = df_editado["Excluir"].fillna(False)
+
+                ids_excluir = df_editado[df_editado["Excluir"] == True]["ID"].tolist()
+                df_atualizar = df_editado[df_editado["Excluir"] == False].drop(columns=["Excluir"])
+
+                df_atualizar["Data_Ocorrencia"] = pd.to_datetime(df_atualizar["Data_Ocorrencia"]).dt.strftime('%Y-%m-%d')
+                df_atualizar["Data_Efetivacao"] = pd.to_datetime(df_atualizar["Data_Efetivacao"]).dt.strftime('%Y-%m-%d')
+
+                df_fluxo_final = df_fluxo.copy().drop(columns=["Excluir", "Competencia"], errors='ignore')
+                df_fluxo_final["Data_Ocorrencia"] = pd.to_datetime(df_fluxo_final["Data_Ocorrencia"]).dt.strftime('%Y-%m-%d')
+                df_fluxo_final["Data_Efetivacao"] = pd.to_datetime(df_fluxo_final["Data_Efetivacao"]).dt.strftime('%Y-%m-%d')
+
+                df_fluxo_final = df_fluxo_final[~df_fluxo_final["ID"].isin(ids_excluir)]
+
+                df_fluxo_final = df_fluxo_final.set_index("ID")
+                df_atualizar = df_atualizar.set_index("ID")
+                df_fluxo_final.update(df_atualizar)
+
+                df_fluxo_final = df_fluxo_final.reset_index()
+                save_data("Fluxo_Caixa", df_fluxo_final)
+
+                st.success("Extrato atualizado com sucesso!")
+                st.rerun()
 
         # --- TOTALIZADOR: exibido abaixo da tabela e do botão salvar ---
         st.markdown(totais_html, unsafe_allow_html=True)
