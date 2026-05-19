@@ -29,14 +29,12 @@ st.markdown("""
             h2 { font-size: 1.3rem !important; }
             h3 { font-size: 1.1rem !important; }
             
-            /* Permite que as tabelas tenham barra de rolagem no celular */
             .stDataFrame, div[data-testid="stDataFrameResizable"] {
                 width: 100% !important;
                 overflow-x: auto !important;
                 -webkit-overflow-scrolling: touch;
             }
             
-            /* Reduz o respiro interno (padding) dos formulários para não espremer no celular */
             [data-testid="stForm"] { padding: 15px !important; }
         }
 
@@ -61,14 +59,12 @@ st.markdown("""
         }
         
         /* --- 4. Barra Lateral (Sidebar) --- */
-        /* Sidebar escondida — navegação migrou para o menu horizontal no topo */
         [data-testid="stSidebar"] {
             display: none !important;
         }
         [data-testid="stSidebarCollapsedControl"] {
             display: none !important;
         }
-        /* Quando a sidebar está escondida, o conteúdo principal pode usar largura total */
         section[data-testid="stMain"] > div.block-container,
         .main .block-container {
             margin-left: auto !important;
@@ -306,25 +302,20 @@ st.markdown("""
             .totais-valor { font-size: 14px; }
             .totais-label { font-size: 10px; }
         }
-
-        /* --- 11. Filtros em expander — sem CSS adicional necessário --- */
     </style>
 """, unsafe_allow_html=True)
 
 
 # --- TELA DE LOGIN / BLOQUEIO DE ACESSO ---
 def get_last_update_info():
-    """Retorna string com data/hora da última modificação do arquivo app.py (fuso de Brasília)."""
     try:
         mtime = os.path.getmtime(__file__)
-        # Brasília = UTC-3
         dt_brasilia = datetime.fromtimestamp(mtime, tz=timezone.utc).astimezone(timezone(timedelta(hours=-3)))
         return dt_brasilia.strftime("%d/%m/%Y às %H:%M")
     except Exception:
         return "indisponível"
 
 def get_auth_token(senha):
-    """Gera um token determinístico baseado na senha."""
     return hashlib.sha256(f"{senha}|fluxo_caixa_v1".encode()).hexdigest()[:32]
 
 def password_entered():
@@ -402,7 +393,6 @@ def check_password():
 if not check_password():
     st.stop()
 
-# 1. Estabelece a conexão base
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 # --- FUNÇÕES AUXILIARES ---
@@ -432,6 +422,10 @@ def parse_br_to_float(v):
         return float(v)
     except Exception:
         return 0.0
+
+def is_ativo(status_val):
+    """Retorna True se o registro está ativo (Status == 'A')."""
+    return str(status_val).strip().upper() == "A"
 
 # --- MENU DE NAVEGAÇÃO HORIZONTAL ---
 menu = option_menu(
@@ -485,6 +479,7 @@ menu = option_menu(
 )
 
 # --- TELA 1: CALENDÁRIO ---
+# O calendário considera SOMENTE registros com Status == "A" para o saldo acumulado
 if menu == "Calendário":
     st.title("💸 Fluxo de Caixa")
     
@@ -546,7 +541,15 @@ if menu == "Calendário":
     if not df_fluxo.empty and "Data_Efetivacao" in df_fluxo.columns:
         df_fluxo['Data_Efetivacao'] = pd.to_datetime(df_fluxo['Data_Efetivacao'])
         df_fluxo = df_fluxo.sort_values('Data_Efetivacao')
-        df_fluxo['Saldo_Acumulado'] = saldo_inicial + pd.to_numeric(df_fluxo['Valor'], errors='coerce').fillna(0).cumsum()
+
+        # --- NOVO: garantir coluna Status preenchida; calcular saldo apenas com ativos ---
+        if "Status" not in df_fluxo.columns:
+            df_fluxo["Status"] = "A"
+        df_fluxo["Status"] = df_fluxo["Status"].fillna("A").replace("", "A")
+
+        # Saldo acumulado considera somente registros ativos
+        df_fluxo_ativo = df_fluxo[df_fluxo["Status"].str.strip().str.upper() == "A"].copy()
+        df_fluxo_ativo['Saldo_Acumulado'] = saldo_inicial + pd.to_numeric(df_fluxo_ativo['Valor'], errors='coerce').fillna(0).cumsum()
         
         calendar.setfirstweekday(calendar.SUNDAY)
         cal = calendar.monthcalendar(ano_sel, mes_sel)
@@ -564,10 +567,12 @@ if menu == "Calendário":
                 else:
                     data_dia = datetime(ano_sel, mes_sel, dia)
                     
-                    saldo_dia = df_fluxo[df_fluxo['Data_Efetivacao'] <= data_dia]['Saldo_Acumulado'].last_valid_index()
-                    valor_saldo = df_fluxo.loc[saldo_dia, 'Saldo_Acumulado'] if saldo_dia is not None else saldo_inicial
+                    # Saldo: apenas ativos
+                    saldo_dia_idx = df_fluxo_ativo[df_fluxo_ativo['Data_Efetivacao'] <= data_dia]['Saldo_Acumulado'].last_valid_index()
+                    valor_saldo = df_fluxo_ativo.loc[saldo_dia_idx, 'Saldo_Acumulado'] if saldo_dia_idx is not None else saldo_inicial
                     
-                    df_mov_dia = df_fluxo[df_fluxo['Data_Efetivacao'] == data_dia]
+                    # Movimento do dia: apenas ativos
+                    df_mov_dia = df_fluxo_ativo[df_fluxo_ativo['Data_Efetivacao'] == data_dia]
                     movimento_dia = pd.to_numeric(df_mov_dia['Valor'], errors='coerce').fillna(0).sum() if not df_mov_dia.empty else 0.0
                     
                     cor_texto = "#9f1239" if valor_saldo < 0 else "#0f766e"
@@ -658,7 +663,7 @@ elif menu == "Lançamentos":
                             "Categoria": cat,
                             "Descricao": desc,
                             "Valor": valor_final,
-                            "Status": "Efetivado",
+                            "Status": "A",          # <-- nasce ativo
                             "Origem": "Movimento Banco",
                             "Cartao": ""                
                         }])
@@ -681,6 +686,11 @@ elif menu == "Relatório":
     if df_fluxo.empty or len(df_fluxo.columns) == 0:
         st.info("Nenhum lançamento encontrado no fluxo de caixa.")
     else:
+        # --- NOVO: garantir coluna Status preenchida com "A" onde estiver vazia ---
+        if "Status" not in df_fluxo.columns:
+            df_fluxo["Status"] = "A"
+        df_fluxo["Status"] = df_fluxo["Status"].fillna("A").replace("", "A")
+
         df_fluxo["Excluir"] = False
 
         if "Data_Efetivacao" in df_fluxo.columns:
@@ -729,6 +739,14 @@ elif menu == "Relatório":
             filtro_origem = st.multiselect("Origem", opcoes_origem, placeholder="Selecione...")
             filtro_cartao = st.multiselect("Cartão", opcoes_cartao, placeholder="Selecione...")
 
+            # --- NOVO: filtro de status ativo/inativo ---
+            filtro_ativo = st.multiselect(
+                "Status Ativo",
+                options=["✅ Ativo", "⛔ Inativo"],
+                default=[],          # vazio = mostra todos
+                placeholder="Todos (ativos e inativos)..."
+            )
+
             st.markdown("<hr style='margin: 12px 0; border-color: #f1f5f9;'>", unsafe_allow_html=True)
             agrupar_faturas = st.checkbox(
                 "💳 Agrupar faturas de cartão por vencimento",
@@ -751,6 +769,18 @@ elif menu == "Relatório":
         if filtro_cartao:
             df_filtrado = df_filtrado[df_filtrado["Cartao"].isin(filtro_cartao)]
 
+        # --- NOVO: aplicar filtro ativo/inativo ---
+        if filtro_ativo:
+            mostrar_ativos   = "✅ Ativo"   in filtro_ativo
+            mostrar_inativos = "⛔ Inativo" in filtro_ativo
+            mask_ativo   = df_filtrado["Status"].str.strip().str.upper() == "A"
+            mask_inativo = df_filtrado["Status"].str.strip().str.upper() != "A"
+            if mostrar_ativos and not mostrar_inativos:
+                df_filtrado = df_filtrado[mask_ativo]
+            elif mostrar_inativos and not mostrar_ativos:
+                df_filtrado = df_filtrado[mask_inativo]
+            # se ambos marcados: mostra tudo (sem filtro adicional)
+
         # --- Separar linhas de cartão se a flag estiver ativa ---
         if agrupar_faturas and "Origem" in df_filtrado.columns:
             mask_cartao = df_filtrado["Origem"] == "Cartão de Crédito"
@@ -764,18 +794,19 @@ elif menu == "Relatório":
             df_filtrado = df_filtrado.sort_values(by="Data_Efetivacao", ascending=False).reset_index(drop=True)
             df_filtrado.index = range(1, len(df_filtrado) + 1)
 
-        # --- TOTALIZADOR: calcular antes de formatar os valores ---
+        # --- TOTALIZADOR: apenas registros ATIVOS entram nos totais ---
         if not df_filtrado.empty and "Valor" in df_filtrado.columns:
-            valores_num = pd.to_numeric(df_filtrado["Valor"], errors="coerce").fillna(0)
+            mask_ativos_total = df_filtrado["Status"].str.strip().str.upper() == "A"
+            valores_num = pd.to_numeric(df_filtrado.loc[mask_ativos_total, "Valor"], errors="coerce").fillna(0)
             total_entradas = valores_num[valores_num > 0].sum()
-            total_saidas = valores_num[valores_num < 0].sum()
+            total_saidas   = valores_num[valores_num < 0].sum()
         else:
             total_entradas = 0.0
-            total_saidas = 0.0
+            total_saidas   = 0.0
         saldo_periodo = total_entradas + total_saidas
         cor_saldo_class = "totais-saldo-pos" if saldo_periodo >= 0 else "totais-saldo-neg"
         sinal_saldo = "+" if saldo_periodo > 0 else ""
-        # (HTML montado aqui, renderizado após a tabela)
+
         totais_html = f"""
         <div class="totais-bar">
             <div class="totais-item">
@@ -791,8 +822,8 @@ elif menu == "Relatório":
                 <span class="totais-valor {cor_saldo_class}">{sinal_saldo}R$ {formatar_br(saldo_periodo)}</span>
             </div>
             <div class="totais-item">
-                <span class="totais-label">📄 Registros</span>
-                <span class="totais-valor" style="color:#475569;">{len(df_filtrado)}</span>
+                <span class="totais-label">📄 Registros (ativos)</span>
+                <span class="totais-valor" style="color:#475569;">{int(mask_ativos_total.sum()) if not df_filtrado.empty else 0}</span>
             </div>
         </div>
         """
@@ -802,18 +833,30 @@ elif menu == "Relatório":
         if df_filtrado.empty:
             st.info("Nenhum lançamento encontrado para os filtros aplicados.")
         else:
+            # --- NOVO: coluna Ativo como checkbox derivada do Status ---
+            # Exibimos uma coluna booleana "Ativo" para o usuário marcar/desmarcar;
+            # ao salvar, convertemos de volta para "A" / "I" na coluna Status.
+            df_filtrado["Ativo"] = df_filtrado["Status"].str.strip().str.upper() == "A"
+
             df_filtrado["Valor"] = df_filtrado["Valor"].apply(formatar_br)
 
             col_config = {
                 "ID": None,
-                "Excluir": st.column_config.CheckboxColumn("Excluir", default=False),
+                "Status": None,                          # ocultamos a coluna Status bruta
+                "Ativo": st.column_config.CheckboxColumn(
+                    "Ativo",
+                    help="Desmarque para inativar o registro (ele não entrará nos totais nem no saldo).",
+                    default=True,
+                    width="small"
+                ),
+                "Excluir": st.column_config.CheckboxColumn("Excluir", default=False, width="small"),
                 "Data_Ocorrencia": st.column_config.DateColumn("Data Ocorrência", format="DD/MM/YYYY"),
                 "Data_Efetivacao": st.column_config.DateColumn("Data Efetivação", format="DD/MM/YYYY"),
                 "Valor": st.column_config.TextColumn("Valor (R$)")
             }
 
             _filtro_key = hashlib.md5(
-                f"{filtro_comp}|{filtro_cat}|{filtro_origem}|{filtro_cartao}|{agrupar_faturas}".encode()
+                f"{filtro_comp}|{filtro_cat}|{filtro_origem}|{filtro_cartao}|{filtro_ativo}|{agrupar_faturas}".encode()
             ).hexdigest()[:12]
 
             df_editado = st.data_editor(
@@ -825,8 +868,11 @@ elif menu == "Relatório":
             )
 
             if st.button("Salvar Alterações", type="primary"):
-                df_editado["Valor"] = df_editado["Valor"].apply(parse_br_to_float)
+                # Converter checkbox Ativo → coluna Status
+                df_editado["Status"] = df_editado["Ativo"].apply(lambda v: "A" if v else "I")
+                df_editado = df_editado.drop(columns=["Ativo"])
 
+                df_editado["Valor"] = df_editado["Valor"].apply(parse_br_to_float)
                 df_editado["Excluir"] = df_editado["Excluir"].fillna(False)
 
                 ids_excluir = df_editado[df_editado["Excluir"] == True]["ID"].tolist()
@@ -851,10 +897,10 @@ elif menu == "Relatório":
                 st.success("Extrato atualizado com sucesso!")
                 st.rerun()
 
-        # --- TOTALIZADOR: exibido abaixo da tabela e do botão salvar ---
+        # Totalizador abaixo da tabela
         st.markdown(totais_html, unsafe_allow_html=True)
 
-        # --- TABELA DE FATURAS AGRUPADAS (exibida somente quando flag está ativa) ---
+        # --- TABELA DE FATURAS AGRUPADAS ---
         if agrupar_faturas and not df_cartao_linhas.empty:
             st.markdown("<br>", unsafe_allow_html=True)
             st.subheader("💳 Faturas de Cartão (Agrupadas)")
@@ -863,13 +909,16 @@ elif menu == "Relatório":
             df_cartao_linhas["Valor_Num"] = pd.to_numeric(df_cartao_linhas["Valor"], errors="coerce").fillna(0)
             df_cartao_linhas["Competencia_Fatura"] = pd.to_datetime(df_cartao_linhas["Data_Efetivacao"]).dt.strftime('%m/%Y')
 
+            # --- NOVO: totais de faturas consideram apenas ativos ---
             df_faturas = (
                 df_cartao_linhas
                 .groupby(["Cartao", "Data_Efetivacao", "Competencia_Fatura"], as_index=False)
-                .agg(
-                    Qtd_Parcelas=("ID", "count"),
-                    Total_Fatura=("Valor_Num", "sum"),
-                )
+                .apply(lambda g: pd.Series({
+                    "Qtd_Parcelas": len(g),
+                    "Total_Fatura": g.loc[g["Status"].str.strip().str.upper() == "A", "Valor_Num"].sum(),
+                    "Qtd_Inativos": int((g["Status"].str.strip().str.upper() != "A").sum()),
+                }))
+                .reset_index(drop=True)
             )
             df_faturas = df_faturas.sort_values(["Cartao", "Data_Efetivacao"]).reset_index(drop=True)
 
@@ -885,6 +934,7 @@ elif menu == "Relatório":
                 data_venc_str = data_venc.strftime("%d/%m/%Y")
                 competencia = str(row["Competencia_Fatura"])
                 qtd = int(row["Qtd_Parcelas"])
+                qtd_inativos = int(row["Qtd_Inativos"])
                 total = float(row["Total_Fatura"])
                 total_str = f"R$ {formatar_br(abs(total))}"
                 cor_total = "#9f1239" if total < 0 else "#0f766e"
@@ -895,14 +945,17 @@ elif menu == "Relatório":
                 )
                 tem_previsao = False
                 if "Status" in df_cartao_linhas.columns:
-                    tem_previsao = df_cartao_linhas.loc[mask_prev, "Status"].str.contains("Previsão", na=False).any()
+                    tem_previsao = df_cartao_linhas.loc[mask_prev, "Status"].apply(
+                        lambda s: "Previsão" in str(s)
+                    ).any()
 
                 badge_html = '<span class="fatura-badge">Previsão</span>' if tem_previsao else '<span class="fatura-badge" style="background-color:#dcfce7;color:#166534;">Efetivado</span>'
+                badge_inativo = f'<span class="fatura-badge" style="background-color:#fee2e2;color:#991b1b;">⛔ {qtd_inativos} inativo{"s" if qtd_inativos != 1 else ""}</span>' if qtd_inativos > 0 else ''
 
                 html_faturas.append(f"""
                 <div class="fatura-card">
                     <div class="fatura-card-header">
-                        <span class="fatura-cartao-nome">💳 {cartao_nome} {badge_html}</span>
+                        <span class="fatura-cartao-nome">💳 {cartao_nome} {badge_html}{badge_inativo}</span>
                         <span class="fatura-valor" style="color:{cor_total};">{total_str}</span>
                     </div>
                     <div class="fatura-meta">
@@ -917,7 +970,6 @@ elif menu == "Relatório":
 
             st.markdown("".join(html_faturas), unsafe_allow_html=True)
 
-            # --- TABELA DETALHADA dentro de expander fechado ---
             with st.expander("🧾 Ver detalhamento dos lançamentos", expanded=False):
                 df_cartao_detalhe = df_cartao_linhas.copy()
                 df_cartao_detalhe = df_cartao_detalhe.sort_values(
@@ -928,6 +980,8 @@ elif menu == "Relatório":
                 df_cartao_detalhe["Valor_Num"] = df_cartao_detalhe["Valor_Num"].apply(
                     lambda v: formatar_br(abs(v))
                 )
+                # --- NOVO: coluna Ativo no detalhe ---
+                df_cartao_detalhe["Ativo"] = df_cartao_detalhe["Status"].str.strip().str.upper() == "A"
 
                 colunas_detalhe = []
                 renomear = {}
@@ -938,7 +992,7 @@ elif menu == "Relatório":
                     ("Categoria", "Categoria"),
                     ("Descricao", "Descrição"),
                     ("Valor_Num", "Valor (R$)"),
-                    ("Status", "Status"),
+                    ("Ativo", "Ativo"),
                 ]:
                     if col in df_cartao_detalhe.columns:
                         colunas_detalhe.append(col)
@@ -951,6 +1005,8 @@ elif menu == "Relatório":
                     col_config_det["Data Compra"] = st.column_config.DateColumn("Data Compra", format="DD/MM/YYYY")
                 if "Vencimento" in df_cartao_exib.columns:
                     col_config_det["Vencimento"] = st.column_config.DateColumn("Vencimento", format="DD/MM/YYYY")
+                if "Ativo" in df_cartao_exib.columns:
+                    col_config_det["Ativo"] = st.column_config.CheckboxColumn("Ativo", width="small")
 
                 st.dataframe(
                     df_cartao_exib,
@@ -1049,9 +1105,13 @@ elif menu == "Cartões":
                                 "ID": datetime.now().strftime("%Y%m%d%H%M%S") + f"_{i}",
                                 "Data_Ocorrencia": data_compra.strftime("%Y-%m-%d"),
                                 "Data_Efetivacao": data_vencimento.strftime("%Y-%m-%d"),
-                                "Tipo": "Saída", "Categoria": cat_sel, "Descricao": desc_final,
-                                "Valor": -valor_desta_parcela, "Status": "Previsão (Fatura)",
-                                "Origem": "Cartão de Crédito", "Cartao": cartao_sel         
+                                "Tipo": "Saída",
+                                "Categoria": cat_sel,
+                                "Descricao": desc_final,
+                                "Valor": -valor_desta_parcela,
+                                "Status": "A",          # <-- nasce ativo
+                                "Origem": "Cartão de Crédito",
+                                "Cartao": cartao_sel         
                             })
                         
                         df_novos = pd.DataFrame(novos_lancamentos)
@@ -1144,11 +1204,11 @@ elif menu == "Recorrentes":
                     hoje_date = datetime.now().date()
                     
                     for rec_id in ids_excluir:
-                        mascara_apagar = (df_fluxo_novo["ID"].str.startswith(f"REC_{rec_id}")) & (df_fluxo_novo["Status"] == "Previsão (Recorrente)") & (df_fluxo_novo["Data_Efetivacao_dt"] >= hoje_date)
+                        mascara_apagar = (df_fluxo_novo["ID"].str.startswith(f"REC_{rec_id}")) & (df_fluxo_novo["Status"] == "A") & (df_fluxo_novo["Data_Efetivacao_dt"] >= hoje_date)
                         df_fluxo_novo = df_fluxo_novo[~mascara_apagar]
                     
                     for _, row in df_salvar.iterrows():
-                        mascara_atualizar = (df_fluxo_novo["ID"].str.startswith(f"REC_{str(row['ID'])}")) & (df_fluxo_novo["Status"] == "Previsão (Recorrente)") & (df_fluxo_novo["Data_Efetivacao_dt"] >= hoje_date)
+                        mascara_atualizar = (df_fluxo_novo["ID"].str.startswith(f"REC_{str(row['ID'])}")) & (df_fluxo_novo["Status"] == "A") & (df_fluxo_novo["Data_Efetivacao_dt"] >= hoje_date)
                         if mascara_atualizar.any():
                             df_fluxo_novo.loc[mascara_atualizar, "Valor"] = -float(row["Valor_Base"]) if row["Tipo"] == "Saída" else float(row["Valor_Base"])
                             df_fluxo_novo.loc[mascara_atualizar, "Descricao"] = row["Descricao"]
@@ -1217,7 +1277,7 @@ elif menu == "Recorrentes":
                                 "Categoria": row["Categoria"], 
                                 "Descricao": row["Descricao"], 
                                 "Valor": valor_final, 
-                                "Status": "Previsão (Recorrente)", 
+                                "Status": "A",          # <-- nasce ativo
                                 "Origem": "Recorrente", 
                                 "Cartao": ""
                             })
@@ -1226,7 +1286,7 @@ elif menu == "Recorrentes":
                     save_data("Fluxo_Caixa", df_fluxo_atualizado)
                     
                     st.toast(f"✅ {len(novos_lancamentos)} previsões criadas com sucesso!", icon="🎉")
-                    st.success(f"✅ Sucesso! {len(novos_lancamentos)} previsões foram geradas no seu Fluxo de Caixa. Acesse a aba 'Calendário' ou 'Relatório' para visualizar.")
+                    st.success(f"✅ Sucesso! {len(novos_lancamentos)} previsões foram geradas no seu Fluxo de Caixa.")
                 else:
                     st.toast("ℹ️ As previsões já estavam em dia.", icon="ℹ️")
                     st.info("As previsões para os itens e período selecionados já estavam projetadas no seu fluxo de caixa.")
