@@ -833,12 +833,34 @@ elif menu == "Relatório":
         if df_filtrado.empty:
             st.info("Nenhum lançamento encontrado para os filtros aplicados.")
         else:
-            # --- NOVO: coluna Ativo como checkbox derivada do Status ---
-            # Exibimos uma coluna booleana "Ativo" para o usuário marcar/desmarcar;
-            # ao salvar, convertemos de volta para "A" / "I" na coluna Status.
+            # --- coluna Ativo como checkbox derivada do Status ---
             df_filtrado["Ativo"] = df_filtrado["Status"].str.strip().str.upper() == "A"
 
             df_filtrado["Valor"] = df_filtrado["Valor"].apply(formatar_br)
+
+            # --- AJUSTE DE ORDEM: Ativo logo após Valor, Excluir logo após Ativo ---
+            # Colunas ocultas que ficam no final (para o data_editor poder acessá-las via col_config)
+            colunas_ocultas = ["ID", "Status"]
+            # Colunas de ação que queremos posicionar explicitamente
+            colunas_acao = ["Ativo", "Excluir"]
+            # Demais colunas mantendo a ordem original, sem as especiais e sem as ocultas
+            colunas_base = [
+                c for c in df_filtrado.columns.tolist()
+                if c not in colunas_acao and c not in colunas_ocultas
+            ]
+            # Inserir Ativo e Excluir logo após Valor
+            if "Valor" in colunas_base:
+                idx_valor = colunas_base.index("Valor")
+                colunas_ordenadas = (
+                    colunas_base[:idx_valor + 1]
+                    + ["Ativo", "Excluir"]
+                    + colunas_base[idx_valor + 1:]
+                    + colunas_ocultas
+                )
+            else:
+                colunas_ordenadas = colunas_base + ["Ativo", "Excluir"] + colunas_ocultas
+
+            df_filtrado = df_filtrado[colunas_ordenadas]
 
             col_config = {
                 "ID": None,
