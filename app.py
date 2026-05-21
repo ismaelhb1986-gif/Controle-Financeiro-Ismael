@@ -791,7 +791,7 @@ elif menu == "Relatório":
 
         df_filtrado = df_filtrado.drop(columns=["Competencia"], errors="ignore")
         if not df_filtrado.empty:
-            df_filtrado = df_filtrado.sort_values(by="Data_Efetivacao", ascending=False).reset_index(drop=True)
+            df_filtrado = df_filtrado.sort_values(by="Data_Efetivacao", ascending=True).reset_index(drop=True)
             df_filtrado.index = range(1, len(df_filtrado) + 1)
 
         # --- TOTALIZADOR: apenas registros ATIVOS entram nos totais ---
